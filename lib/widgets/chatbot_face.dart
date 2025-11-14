@@ -11,9 +11,9 @@ class ChatBotFace extends StatefulWidget {
 }
 
 class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin {
-  bool _isTalking = false;
+  final bool _isTalking = false;
   bool _eyesClosed = false;
-  bool _mouthOpen = false;
+  final bool _mouthOpen = false;
 
   // Microphone / recording state (simple stub: no external recorder)
   bool _isRecording = false;
