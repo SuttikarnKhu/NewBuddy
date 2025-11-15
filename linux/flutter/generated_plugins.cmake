@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_linux
   flutter_volume_controller
+  record_linux
   zego_express_engine
 )
 

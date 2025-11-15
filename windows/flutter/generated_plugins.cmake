@@ -7,6 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
   flutter_volume_controller
   permission_handler_windows
+  record_windows
   zego_express_engine
   zego_zim
 )
