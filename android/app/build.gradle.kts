@@ -25,7 +25,7 @@ android {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.newbuddy"
     // Some plugins require minSdk >= 22; set to 22 for compatibility.
-    minSdk = 22
+    minSdk = flutter.minSdkVersion
     // Set target and compile SDKs to highest plugin requirement (36)
     targetSdk = 36
         versionCode = flutter.versionCode
