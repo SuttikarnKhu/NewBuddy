@@ -1,5 +1,10 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
+
+# Explicitly set Visual Studio 18 2026 generator for Flutter compatibility
+set(CMAKE_GENERATOR "Visual Studio 18 2026" CACHE STRING "Generator" FORCE)
+set(CMAKE_GENERATOR_PLATFORM "x64" CACHE STRING "Platform" FORCE)
+
 project(newbuddy LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change

@@ -9,8 +9,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  zego_uikit_prebuilt_call: ^4.19.0
+  zego_uikit_prebuilt_call: ^4.21.1
   permission_handler: ^12.0.1
+  firebase_core: ^4.2.1
+  cloud_firestore: ^6.1.0
+  zego_uikit_signaling_plugin: ^2.8.19
 
 dev_dependencies:
   flutter_test:
