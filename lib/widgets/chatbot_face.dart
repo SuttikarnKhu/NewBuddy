@@ -1,16 +1,15 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:typed_data'; // Add this
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:just_audio/just_audio.dart'; // Add this
-import 'package:path_provider/path_provider.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import '../screens/join_screen.dart';
 import 'package:newbuddy/grpc_client.dart';
 import 'package:logging/logging.dart';
+import 'package:newbuddy/src/wake_word_service.dart';
+import 'package:flutter_voice_processor/flutter_voice_processor.dart';
 
-// Add this class for just_audio
 class BytesAudioSource extends StreamAudioSource {
   final List<int> _bytes;
 
@@ -43,12 +42,14 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   String _responseMessage = 'Ready to listen...';
   bool _isProcessingGrpc = false;
   final AudioRecorder _audioRecorder = AudioRecorder();
-  final AudioPlayer _audioPlayer = AudioPlayer(); // Add this
-
-  bool _isTalking = false; // Make non-final
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  late final WakeWordService _wakeWordService;
+  final List<int> _audioBuffer = [];
+  final VoiceProcessor? _voiceProcessor = VoiceProcessor.instance;
+  bool _isListeningForWakeWord = false;
+  bool _isTalking = false;
   bool _eyesClosed = false;
-  bool _mouthOpen = false; // Make non-final
-
+  bool _mouthOpen = false;
   bool _isRecording = false;
 
   Timer? _blinkTimer;
@@ -57,18 +58,50 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+    _wakeWordService = WakeWordService(onWakeWord: _onWakeWordDetected);
+    _initServices();
+
     _startBlinking();
-    _setupAudioPlayerListener(); // Add this
+    _setupAudioPlayerListener();
     _log.info('ChatBotFace initialized.');
   }
 
-  // Add this method
+  Future<void> _initServices() async {
+    try {
+      await _wakeWordService.init();
+      final status = await Permission.microphone.request();
+      if (!status.isGranted) {
+        _log.warning('Microphone permission denied. Cannot start services.');
+        setState(() {
+          _responseMessage = 'Microphone permission denied.';
+        });
+        return;
+      }
+      await _wakeWordService.start();
+      setState(() {
+        _isListeningForWakeWord = true;
+        _responseMessage = 'Listening for wake word...';
+      });
+    } catch (e) {
+      _log.severe('Failed to start services on init: $e');
+      setState(() {
+        _responseMessage = 'Could not start services.';
+      });
+    }
+  }
+
+  void _onWakeWordDetected(int keywordIndex) {
+    _log.info(">>>>>> WAKE WORD DETECTED! <<<<<<");
+    setState(() {
+      _isListeningForWakeWord = false;
+      _responseMessage = "Wake word detected! Press mic to record.";
+    });
+  }
+
   void _setupAudioPlayerListener() {
     _audioPlayer.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed) {
-        setState(() {
-          _isTalking = false;
-        });
+        setState(() => _isTalking = false);
         _talkingMouthTimer?.cancel();
         _log.info('Audio playback completed.');
       }
@@ -84,41 +117,76 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   }
 
   Future<void> _handleMicPressed() async {
-    try {
-      final status = await Permission.microphone.request();
-      if (!status.isGranted) {
-        _log.warning('Microphone permission denied.');
-        return;
-      }
-
-      if (_isRecording) {
-        // Stop recording
-        final path = await _audioRecorder.stop();
-        if (path != null) {
-          _log.info('Recording stopped. File saved at: $path');
-          final audioFile = File(path);
-          final audioBytes = await audioFile.readAsBytes();
-          _processRecordedAudio(audioBytes.toList());
-          await audioFile.delete();
-        }
-        setState(() => _isRecording = false);
-      } else {
-        // Start recording
-        final tempDir = await getTemporaryDirectory();
-        final path = '${tempDir.path}/myFile.pcm';
-        await _audioRecorder.start(
-          const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 16000),
-          path: path,
-        );
+    if (_isRecording) {
+      await _stopRecording();
+    } else if (!_isListeningForWakeWord) {
+      await _startRecording();
+    } else {
+      // Toggle wake word listening
+      if (_isListeningForWakeWord) {
+        await _wakeWordService.stop();
         setState(() {
-          _isRecording = true;
-          _responseMessage = 'Recording...';
+          _isListeningForWakeWord = false;
+          _responseMessage = 'Ready to listen...';
         });
-        _log.info('Recording started in raw 16-bit PCM format.');
+      } else {
+        try {
+          await _wakeWordService.start();
+          setState(() {
+            _isListeningForWakeWord = true;
+            _responseMessage = 'Listening for wake word...';
+          });
+        } catch (e) {
+          _log.severe('Error starting wake word listener: $e');
+          setState(() {
+            _responseMessage = 'Error: Could not start listener.';
+          });
+        }
       }
-    } catch (e) {
-      _log.severe('Microphone error: $e');
     }
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      _audioBuffer.clear();
+      _voiceProcessor?.addFrameListener(_voiceProcessorFrameListener);
+      // These values should be based on what the gRPC server expects.
+      // Using common values for now.
+      await _voiceProcessor?.start(512, 16000);
+      setState(() {
+        _isRecording = true;
+        _responseMessage = 'Recording... Press mic to stop.';
+      });
+      _log.info('Recording started for STT.');
+    } catch (e) {
+      _log.severe('Error starting recording: $e');
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    if (!_isRecording) return;
+
+    _voiceProcessor?.removeFrameListener(_voiceProcessorFrameListener);
+    await _voiceProcessor?.stop();
+
+    setState(() => _isRecording = false);
+    _log.info('Recording stopped. Processing buffered audio.');
+
+    if (_audioBuffer.isNotEmpty) {
+      _processRecordedAudio(_audioBuffer.toList());
+      _audioBuffer.clear();
+    }
+
+    // Go back to listening for wake word
+    await _wakeWordService.start();
+    setState(() {
+      _isListeningForWakeWord = true;
+      _responseMessage = 'Listening for wake word...';
+    });
+  }
+
+  void _voiceProcessorFrameListener(List<int> frame) {
+    _audioBuffer.addAll(frame);
   }
 
   Future<void> _processRecordedAudio(List<int> audioData) async {
@@ -137,7 +205,8 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       final response = await _grpcClient.processSpeech(audioData, sampleRate);
 
       setState(() {
-        _responseMessage = 'Transcribed: ${response.transcribedText}\nLLM Response: ${response.llmResponse}';
+        _responseMessage = '''Transcribed: ${response.transcribedText}
+LLM Response: ${response.llmResponse}''';
         _isProcessingGrpc = false;
       });
       _log.info('UI State: gRPC response received.');
@@ -154,7 +223,6 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     }
   }
 
-  // Add this method
   Future<void> _playAudioResponse(List<int> pcmBytes) async {
     _log.info('Preparing to play ${pcmBytes.length} bytes of PCM audio.');
     try {
@@ -168,9 +236,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       await _audioPlayer.setAudioSource(BytesAudioSource(wavBytes));
       _audioPlayer.play();
 
-      setState(() {
-        _isTalking = true;
-      });
+      setState(() => _isTalking = true);
 
       _talkingMouthTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
         if (mounted) {
@@ -224,6 +290,8 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     _grpcClient.shutdown();
     _audioRecorder.dispose();
     _audioPlayer.dispose();
+    _wakeWordService.dispose();
+    _voiceProcessor?.stop();
     _log.info('ChatBotFace disposed, clients and players shut down.');
     super.dispose();
   }
@@ -319,7 +387,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
               ],
             ),
           ),
-          // Microphone button only
+          // Microphone button
           Positioned(
             bottom: 12,
             left: 12,
@@ -328,11 +396,19 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  tooltip: 'Microphone',
+                  tooltip: _isRecording
+                      ? 'Stop recording'
+                      : _isListeningForWakeWord
+                          ? 'Listening for wake word...'
+                          : 'Start recording',
                   iconSize: 36,
                   icon: Icon(
-                    _isRecording ? Icons.mic : Icons.mic_none,
-                    color: _isRecording ? Colors.red : null,
+                    _isRecording || _isListeningForWakeWord
+                        ? Icons.mic
+                        : Icons.mic_none,
+                    color: _isRecording || _isListeningForWakeWord
+                        ? Colors.red
+                        : null,
                   ),
                   onPressed: _handleMicPressed,
                 ),

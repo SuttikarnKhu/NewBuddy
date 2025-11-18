@@ -41,7 +41,7 @@ o8qBuh3U6r8u0DVPSIJdr3uy/cGzl8jTsU4DYwJLTCK7Rw==
   GrpcClient() {
     final credentials = ChannelCredentials.secure(
       certificates: serverCrt.codeUnits,
-      authority: 'api.buddy.rest', // This should match the CN of your certificate
+      authority: 'api.buddy.rest',
     );
 
     _channel = ClientChannel(
