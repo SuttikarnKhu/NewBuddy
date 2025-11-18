@@ -1,16 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:newbuddy/model/user.dart';
 
 ValueNotifier<FirebaseService> firebaseService = ValueNotifier(FirebaseService());
 
 class FirebaseService {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  // Auth methods
-  User? get currentAuthUser => _auth.currentUser;
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static UserModel? _currentUser;
 
   static UserModel get currentUserModel {
@@ -22,85 +17,31 @@ class FirebaseService {
     return _currentUser!;
   }
 
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
-
-  Future<UserCredential> signIn({
-    required String email,
-    required String password,
-  }) async {
-    final credential = await _auth.signInWithEmailAndPassword(
-        email: email, password: password);
-    
-    // Load user data after successful sign in
-    await loadCurrentUser(credential.user!.uid);
-    
-    return credential;
-  }
-
-  static Future<void> loadCurrentUser(String uid) async {
+  // Get user by ID from Firestore
+  static Future<UserModel?> getUserById(String userId) async {
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get();
+      final doc = await _firestore.collection('users').doc(userId).get();
       
-      if (doc.exists) {
+      if (doc.exists && doc.data() != null) {
         _currentUser = UserModel.fromJson(doc.data()!);
+        return _currentUser;
       }
+      return null;
     } catch (e) {
-      // Error loading user data
       rethrow;
     }
+  }
+
+  // Load current user (same as getUserById but stores in _currentUser)
+  static Future<void> loadCurrentUser(String uid) async {
+    await getUserById(uid);
   }
 
   static void clearCurrentUser() {
     _currentUser = null;
   }
 
-  // Firestore methods
+  // Get all users stream (for contact list if needed)
   Stream<QuerySnapshot<Map<String, dynamic>>> get buildViews =>
       _firestore.collection('users').snapshots();
-
-  Future<bool> saveUser({
-    required String email,
-    required String password,
-    required String name,
-  }) async {
-    try {
-      final UserCredential credential =
-          await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-
-      if (credential.user == null) {
-        return false;
-      }
-
-      var userRef = _firestore.collection('users').doc(
-            credential.user!.uid,
-          );
-
-      final Timestamp createdAt = Timestamp.now();
-
-      final String token = '';
-
-      final user = UserModel(
-        uid: credential.user!.uid,
-        name: name,
-        email: email,
-        createdAt: createdAt.toDate().toString(),
-        token: token,
-      );
-
-      await userRef.set(user.toJson());
-      
-      // Load the user data into _currentUser after registration
-      _currentUser = user;
-
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
 }
