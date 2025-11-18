@@ -23,20 +23,97 @@ class _JoinScreenState extends State<JoinScreen> {
   }
 
   Future<void> _loadUserData() async {
-    final uid = firebaseService.value.currentAuthUser?.uid;
-    if (uid != null) {
-      await FirebaseService.loadCurrentUser(uid);
-      setState(() {
-        try {
-          _currentUser = FirebaseService.currentUserModel;
-        } catch (e) {
-          print('Error getting user: $e');
-        }
-        _isLoading = false;
-      });
-    } else {
-      setState(() => _isLoading = false);
+    setState(() {
+      try {
+        _currentUser = FirebaseService.currentUserModel;
+      } catch (e) {
+        print('Error getting user: $e');
+      }
+      _isLoading = false;
+    });
+  }
+
+  Widget _buildContactList(List<UserModel> users) {
+    if (users.isEmpty) {
+      return const Center(
+        child: Text('No contacts available'),
+      );
     }
+    
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: users.length,
+      itemBuilder: (context, index) {
+        final user = users[index];
+        return Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.1),
+                spreadRadius: 1,
+                blurRadius: 3,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: CircleAvatar(
+              backgroundColor: Colors.deepPurple.shade100,
+              radius: 24,
+              child: Text(
+                user.name[0].toUpperCase(),
+                style: TextStyle(
+                  color: Colors.deepPurple.shade700,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            title: Text(
+              user.name,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Voice call button using Zego's invitation button
+                ZegoSendCallInvitationButton(
+                  buttonSize: const Size(48, 48),
+                  iconSize: const Size(28, 28),
+                  isVideoCall: false,
+                  invitees: [
+                    ZegoUIKitUser(
+                      id: user.id,
+                      name: user.name,
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 8),
+                // Video call button using Zego's invitation button
+                ZegoSendCallInvitationButton(
+                  buttonSize: const Size(48, 48),
+                  iconSize: const Size(28, 28),
+                  isVideoCall: true,
+                  invitees: [
+                    ZegoUIKitUser(
+                      id: user.id,
+                      name: user.name,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -151,7 +228,7 @@ class _JoinScreenState extends State<JoinScreen> {
                 // Filter out current user
                 final users = snapshot.data!.docs
                     .map((doc) => UserModel.fromJson(doc.data() as Map<String, dynamic>))
-                    .where((user) => user.uid != _currentUser!.uid)
+                    .where((user) => user.id != _currentUser!.id)
                     .toList();
                 
                 if (users.isEmpty) {
@@ -160,80 +237,7 @@ class _JoinScreenState extends State<JoinScreen> {
                   );
                 }
                 
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  itemCount: users.length,
-                  itemBuilder: (context, index) {
-                    final user = users[index];
-                    return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
-                            spreadRadius: 1,
-                            blurRadius: 3,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.deepPurple.shade100,
-                          radius: 24,
-                          child: Text(
-                            user.name[0].toUpperCase(),
-                            style: TextStyle(
-                              color: Colors.deepPurple.shade700,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        title: Text(
-                          user.name,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Voice call button using Zego's invitation button
-                            ZegoSendCallInvitationButton(
-                              buttonSize: const Size(48, 48),
-                              iconSize: const Size(28, 28),
-                              isVideoCall: false,
-                              invitees: [
-                                ZegoUIKitUser(
-                                  id: user.uid,
-                                  name: user.name,
-                                ),
-                              ],
-                            ),
-                            const SizedBox(width: 8),
-                            // Video call button using Zego's invitation button
-                            ZegoSendCallInvitationButton(
-                              buttonSize: const Size(48, 48),
-                              iconSize: const Size(28, 28),
-                              isVideoCall: true,
-                              invitees: [
-                                ZegoUIKitUser(
-                                  id: user.uid,
-                                  name: user.name,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
+                return _buildContactList(users);
               },
             ),
           ),
