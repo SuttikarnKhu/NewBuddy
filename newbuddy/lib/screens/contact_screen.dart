@@ -5,14 +5,14 @@ import 'package:newbuddy/model/user.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:zego_uikit/zego_uikit.dart';
 
-class JoinScreen extends StatefulWidget {
-  const JoinScreen({super.key});
+class ContactScreen extends StatefulWidget {
+  const ContactScreen({super.key});
 
   @override
-  State<JoinScreen> createState() => _JoinScreenState();
+  State<ContactScreen> createState() => _ContactScreenState();
 }
 
-class _JoinScreenState extends State<JoinScreen> {
+class _ContactScreenState extends State<ContactScreen> {
   UserModel? _currentUser;
   bool _isLoading = true;
 
@@ -135,8 +135,10 @@ class _JoinScreenState extends State<JoinScreen> {
     }
     
     return Scaffold(
-      body: Column(
+      body: Stack(
         children: [
+          Column(
+            children: [
           // Top header section
           Container(
             width: double.infinity,
@@ -240,6 +242,18 @@ class _JoinScreenState extends State<JoinScreen> {
           ),
         ],
       ),
+      Positioned(
+        bottom: 16,
+        left: 16,
+        child: FloatingActionButton(
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back to Home',
+          backgroundColor: Colors.blue,
+          child: const Icon(Icons.home),
+        ),
+      ),
+    ],
+    ),
     );
   }
 }

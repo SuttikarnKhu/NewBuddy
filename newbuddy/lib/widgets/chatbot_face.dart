@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../screens/join_screen.dart';
+import '../screens/contact_screen.dart';
 
 class ChatBotFace extends StatefulWidget {
   const ChatBotFace({super.key});
@@ -185,7 +185,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
               icon: const Icon(Icons.video_call, color: Colors.black),
               onPressed: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const JoinScreen()),
+                  MaterialPageRoute(builder: (_) => const ContactScreen()),
                 );
               },
             ),

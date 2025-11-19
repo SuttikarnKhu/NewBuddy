@@ -18,42 +18,44 @@ class FirebaseService {
     return _currentUser!;
   }
 
-  // Get user by ID from Firestore (searches across all caregivers' buddies)
-  static Future<UserModel?> getUserById(String buddyId) async {
+  // Get user by ID from Firestore (searches buddies only, not caregivers)
+  static Future<UserModel?> getUserById(String userId) async {
     try {
-      print('Searching for buddy with ID: $buddyId');
+      print('Searching for buddy with ID: $userId');
       
-      // Since collectionGroup requires wildcard permission, search through caregivers instead
-      // Step 1: Get all caregivers
+      // Search as buddy only (skip caregiver check)
+      print('Searching as buddy...');
       final caregiversSnapshot = await _firestore.collection('caregivers').get();
       print('Searching through ${caregiversSnapshot.docs.length} caregivers...');
       
-      // Step 2: Search each caregiver's buddies subcollection
       for (final caregiverDoc in caregiversSnapshot.docs) {
-        final buddyDoc = await caregiverDoc.reference
+        final buddiesSnapshot = await caregiverDoc.reference
             .collection('buddies')
-            .doc(buddyId)
             .get();
         
-        if (buddyDoc.exists) {
-          print('✅ Found buddy in caregiver: ${caregiverDoc.id}');
-          _caregiverId = caregiverDoc.id;
+        for (final buddyDoc in buddiesSnapshot.docs) {
+          final data = buddyDoc.data();
+          final buddyID = data['buddyID'] as String?;
           
-          final data = buddyDoc.data()!;
-          _currentUser = UserModel(
-            id: buddyDoc.id,
-            name: data['name'] ?? '',
-            gender: data['gender'] ?? '',
-            age: data['age'] is String ? int.tryParse(data['age']) ?? 0 : data['age'] ?? 0,
-            preference: data['role'] ?? '',
-          );
-          
-          print('Successfully loaded user: ${_currentUser!.name}');
-          return _currentUser;
+          if (buddyID == userId) {
+            print('✅ Found buddy in caregiver: ${caregiverDoc.id}');
+            _caregiverId = caregiverDoc.id;
+            
+            _currentUser = UserModel(
+              id: buddyID ?? userId,
+              name: data['name'] ?? '',
+              gender: data['gender'] ?? '',
+              age: data['age'] is String ? int.tryParse(data['age']) ?? 0 : data['age'] ?? 0,
+              preference: data['role'] ?? '',
+            );
+            
+            print('Successfully loaded buddy: ${_currentUser!.name}');
+            return _currentUser;
+          }
         }
       }
       
-      print('❌ Buddy not found in any caregiver');
+      print('❌ User not found as caregiver or buddy');
       return null;
     } catch (e) {
       print('Error getting user by ID: $e');
