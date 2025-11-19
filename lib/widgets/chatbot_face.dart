@@ -40,7 +40,6 @@ class ChatBotFace extends StatefulWidget {
 class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin {
   final GrpcClient _grpcClient = GrpcClient();
   final _log = Logger('ChatBotFace');
-  String _responseMessage = 'Initializing...';
   bool _isProcessingGrpc = false;
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -50,8 +49,10 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   final VoiceProcessor? _voiceProcessor = VoiceProcessor.instance;
   StreamController<List<int>>? _audioStreamController;
   StreamSubscription? _grpcStreamSubscription;
+  DateTime? _interactionStartTime;
 
   bool _isListening = false;
+  bool _isBlushing = false; // Controls the pink cheek visibility
   bool _isTalking = false;
   bool _eyesClosed = false;
   bool _mouthOpen = false;
@@ -81,29 +82,24 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       await _startWakeWordListening();
     } catch (e) {
       _log.severe('Failed to initialize services: $e');
-      setState(() {
-        _responseMessage = 'Failed to initialize services.';
-      });
+      // _responseMessage updates removed from UI
     }
   }
 
   Future<void> _startWakeWordListening() async {
     final status = await Permission.microphone.request();
-    if (!status.isGranted) {
-      _log.warning('Microphone permission denied.');
-      setState(() {
-        _responseMessage = 'Microphone permission denied.';
-      });
-      return;
-    }
-    try {
-      await _wakeWordService.start();
-      setState(() {
-        _isListening = true;
-        _responseMessage = 'Listening for wake word...';
-      });
-      _log.info("Wake word engine started.");
-    } catch (e) {
+          if (!status.isGranted) {
+            _log.warning('Microphone permission denied.');
+            // _responseMessage updates removed from UI
+            return;
+          }
+          try {
+            await _wakeWordService.start();
+            setState(() {
+              _isListening = true;
+              // _responseMessage updates removed from UI
+            });
+            _log.info("Wake word engine started.");    } catch (e) {
       _log.severe("Failed to start wake word listener: $e");
     }
   }
@@ -126,9 +122,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
 
     // Handoff to VAD
     await _cobraVADService.start();
-    setState(() {
-      _responseMessage = "Wake word detected! Speak now.";
-    });
+    // _responseMessage updates removed from UI
     _log.info("Cobra VAD started.");
   }
 
@@ -153,7 +147,10 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   void _setupAudioPlayerListener() {
     _audioPlayer.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed) {
-        setState(() => _isTalking = false);
+        setState(() {
+            _isTalking = false;
+            _isBlushing = false; // Stop blushing
+        });
         _talkingMouthTimer?.cancel();
         _log.info('Audio playback completed.');
       }
@@ -171,7 +168,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   Future<void> _handleMicPressed() async {
     if (_isListening) {
       await _stopWakeWordListening();
-      setState(() => _responseMessage = "Services stopped.");
+      // _responseMessage updates removed from UI
     } else {
       await _startWakeWordListening();
     }
@@ -190,11 +187,11 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       
       _grpcStreamSubscription = responseStream.listen(
         (response) {
-          _log.info("Received stream response: ${response.transcribedText}");
-          setState(() {
-            _responseMessage = 'Transcribed: ${response.transcribedText}\nLLM: ${response.llmResponse}';
-            _isProcessingGrpc = false; // Ensure spinner is off if it was on
-          });
+          _log.info("Received stream response: Transcribed: ${response.transcribedText}, LLM: ${response.llmResponse}");
+          // setState(() {
+          //   _responseMessage = 'Transcribed: ${response.transcribedText}\nLLM: ${response.llmResponse}';
+          //   _isProcessingGrpc = false; 
+          // });
           
           if (response.audioData.isNotEmpty) {
              _playAudioResponse(response.audioData);
@@ -202,7 +199,8 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
         },
         onError: (e) {
           _log.severe('gRPC stream error: $e');
-          setState(() => _responseMessage = 'Error: $e');
+          setState(() => _isBlushing = false); // Stop blushing on error
+          // _responseMessage updates removed from UI
         },
         onDone: () {
           _log.info('gRPC stream closed by server.');
@@ -210,7 +208,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       );
     } catch (e) {
       _log.severe('Failed to start gRPC stream: $e');
-       setState(() => _responseMessage = 'Connection failed.');
+       // setState(() => _responseMessage = 'Connection failed.'); // Error message kept in logs
        return;
     }
 
@@ -218,7 +216,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     await _voiceProcessor?.start(512, 16000);
     setState(() {
       _isRecording = true;
-      _responseMessage = 'Recording...';
+      // _responseMessage updates removed from UI
       _isProcessingGrpc = true; // Optional: Show processing state while streaming
     });
     _log.info("Recording started...");
@@ -229,6 +227,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
 
   void _stopRecording() async {
     if (!_isRecording) return;
+    _interactionStartTime = DateTime.now(); // Start timer for total response time
     _log.info("Silence timeout, stopping recording.");
 
     _vadSilenceTimer?.cancel();
@@ -247,6 +246,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     setState(() {
       _isRecording = false;
       _isVoiceDetected = false;
+      _isBlushing = true; // Show blushing while processing/talking
       // _isProcessingGrpc = false; // Keep true if waiting for final response?
     });
 
@@ -285,6 +285,11 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
 
       await _audioPlayer.setAudioSource(BytesAudioSource(wavBytes));
       _audioPlayer.play();
+      
+      if (_interactionStartTime != null) {
+        final latency = DateTime.now().difference(_interactionStartTime!);
+        _log.info('LATENCY (End of speech -> Start of playback): ${(latency.inMilliseconds / 1000).toStringAsFixed(2)} seconds');
+      }
 
       setState(() => _isTalking = true);
 
@@ -386,6 +391,27 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     }
   }
 
+  Widget _buildCheek() {
+    return Opacity(
+      opacity: _isBlushing ? 1.0 : 0.0,
+      child: Container(
+        width: 60,
+        height: 30,
+        decoration: BoxDecoration(
+          color: Colors.pink.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.pink.withOpacity(0.1),
+              blurRadius: 10,
+              spreadRadius: 5,
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -415,6 +441,17 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
             right: size.width * 0.25 - 15,
             child: _buildEye(_eyesClosed),
           ),
+          // Cheeks
+          Positioned(
+            top: size.height * 0.32,
+            left: size.width * 0.12,
+            child: _buildCheek(),
+          ),
+          Positioned(
+            top: size.height * 0.32,
+            right: size.width * 0.12,
+            child: _buildCheek(),
+          ),
           // Mouth
           Positioned(
             top: size.height * 0.60,
@@ -428,16 +465,8 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
             right: 0,
             child: Column(
               children: [
-                if (_isProcessingGrpc)
-                  const CircularProgressIndicator(),
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Text(
-                    _responseMessage,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                  ),
-                ),
+                // CircularProgressIndicator removed
+                // _responseMessage text removed
               ],
             ),
           ),
