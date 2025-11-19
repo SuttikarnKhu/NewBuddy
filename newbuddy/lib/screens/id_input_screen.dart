@@ -22,7 +22,7 @@ class _IdInputScreenState extends State<IdInputScreen> {
     
     if (id.isEmpty) {
       setState(() {
-        _errorMessage = 'Please enter your ID';
+        _errorMessage = 'Please enter your buddy ID';
       });
       return;
     }
@@ -43,6 +43,81 @@ class _IdInputScreenState extends State<IdInputScreen> {
         });
         return;
       }
+
+      setState(() {
+        _isLoading = false;
+      });
+
+      // Show confirmation dialog
+      if (mounted) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('Confirm Buddy'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Connect as:'),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Icon(
+                        user.gender.toLowerCase() == 'male' 
+                          ? Icons.person 
+                          : Icons.person_outline,
+                        size: 40,
+                        color: Colors.blue,
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              user.name,
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '${user.age} years old • ${user.gender}',
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Confirm'),
+                ),
+              ],
+            );
+          },
+        );
+
+        if (confirmed != true) {
+          return;
+        }
+      }
+
+      setState(() {
+        _isLoading = true;
+      });
 
       // Initialize Zego call service
       await ZegoUIKitPrebuiltCallInvitationService().init(
@@ -80,20 +155,28 @@ class _IdInputScreenState extends State<IdInputScreen> {
         title: const Text('Enter Your ID'),
         centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Icon(
-              Icons.person_outline,
-              size: 80,
-              color: Colors.blue,
-            ),
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 40),
+              Image.asset(
+                'assets/logo.png',
+                height: 80,
+                errorBuilder: (context, error, stackTrace) {
+                  return const Icon(
+                    Icons.person_outline,
+                    size: 80,
+                    color: Colors.blue,
+                  );
+                },
+              ),
             const SizedBox(height: 32),
             const Text(
-              'Welcome to NewBuddy',
+              'Welcome to Buddy',
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
@@ -113,8 +196,7 @@ class _IdInputScreenState extends State<IdInputScreen> {
             TextField(
               controller: _idController,
               decoration: InputDecoration(
-                labelText: 'User ID',
-                hintText: 'Enter your ID',
+                labelText: 'Buddy ID',
                 prefixIcon: const Icon(Icons.badge),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -147,8 +229,10 @@ class _IdInputScreenState extends State<IdInputScreen> {
                       style: TextStyle(fontSize: 16),
                     ),
             ),
+            const SizedBox(height: 40),
           ],
         ),
+      ),
       ),
     );
   }

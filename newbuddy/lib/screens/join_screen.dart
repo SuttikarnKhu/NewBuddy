@@ -138,9 +138,9 @@ class _JoinScreenState extends State<JoinScreen> {
           // Top header section
           Container(
             width: double.infinity,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               gradient: LinearGradient(
-                colors: [Colors.deepPurple, Colors.deepPurple.shade700],
+                colors: [Color(0xFF1560BD), Color(0xFF1560BD)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -192,7 +192,7 @@ class _JoinScreenState extends State<JoinScreen> {
           
           // Contacts list
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
+            child: StreamBuilder<DocumentSnapshot>(
               stream: firebaseService.value.buildViews,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -219,38 +219,24 @@ class _JoinScreenState extends State<JoinScreen> {
                   );
                 }
                 
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                if (!snapshot.hasData || !snapshot.data!.exists) {
                   return const Center(
-                    child: Text('No contacts available'),
+                    child: Text('No caregiver found'),
                   );
                 }
                 
-                // Filter out current user
-                final users = snapshot.data!.docs
-                    .map((doc) => UserModel.fromJson(doc.data() as Map<String, dynamic>))
-                    .where((user) => user.id != _currentUser!.id)
-                    .toList();
+                // Get caregiver data
+                final caregiverData = snapshot.data!.data() as Map<String, dynamic>;
+                final caregiver = UserModel.fromJson({
+                  'id': snapshot.data!.id,
+                  ...caregiverData,
+                });
                 
-                if (users.isEmpty) {
-                  return const Center(
-                    child: Text('No other users found'),
-                  );
-                }
-                
-                return _buildContactList(users);
+                return _buildContactList([caregiver]);
               },
             ),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Add contact feature coming soon!')),
-          );
-        },
-        backgroundColor: Colors.deepPurple,
-        child: const Icon(Icons.person_add),
       ),
     );
   }

@@ -17,8 +17,8 @@ class UserModel {
     id: json['id'] ?? '',
     name: json['name'] ?? '',
     gender: json['gender'] ?? '',
-    age: json['age'] ?? 0,
-    preference: json['preference'] ?? '',
+    age: json['age'] is String ? int.tryParse(json['age']) ?? 0 : json['age'] ?? 0,
+    preference: json['preference'] ?? json['role'] ?? '',
   );
   
   Map<String, dynamic> toJson() => {

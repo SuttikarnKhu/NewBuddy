@@ -4,7 +4,7 @@ import 'firebase_options.dart';
 import 'package:zego_uikit/zego_uikit.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:zego_uikit_signaling_plugin/zego_uikit_signaling_plugin.dart';
-import 'screens/home_screen.dart';
+import 'screens/id_input_screen.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 
@@ -35,7 +35,7 @@ class MainApp extends StatelessWidget {
       title: 'NewBuddy',
       theme: ThemeData(primarySwatch: Colors.blue),
       navigatorKey: navigatorKey,
-      home: const HomeScreen(),
+      home: const IdInputScreen(),
     );
   }
 }
