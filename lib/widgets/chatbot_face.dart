@@ -8,11 +8,12 @@ import '../screens/join_screen.dart';
 import 'package:newbuddy/grpc_client.dart';
 import 'package:logging/logging.dart';
 import 'package:newbuddy/src/wake_word_service.dart';
+import 'package:newbuddy/src/cobra_vad_service.dart';
+import 'package:newbuddy/constants/picovoice.dart';
 import 'package:flutter_voice_processor/flutter_voice_processor.dart';
 
 class BytesAudioSource extends StreamAudioSource {
   final List<int> _bytes;
-
   BytesAudioSource(this._bytes) : super(tag: 'BytesAudioSource');
 
   @override
@@ -39,28 +40,33 @@ class ChatBotFace extends StatefulWidget {
 class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin {
   final GrpcClient _grpcClient = GrpcClient();
   final _log = Logger('ChatBotFace');
-  String _responseMessage = 'Ready to listen...';
+  String _responseMessage = 'Initializing...';
   bool _isProcessingGrpc = false;
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   late final WakeWordService _wakeWordService;
+  late final CobraVADService _cobraVADService;
   final List<int> _audioBuffer = [];
   final VoiceProcessor? _voiceProcessor = VoiceProcessor.instance;
-  bool _isListeningForWakeWord = false;
+
+  bool _isListening = false;
   bool _isTalking = false;
   bool _eyesClosed = false;
   bool _mouthOpen = false;
   bool _isRecording = false;
+  bool _isVoiceDetected = false;
 
   Timer? _blinkTimer;
   Timer? _talkingMouthTimer;
+  Timer? _vadSilenceTimer;
+  static const Duration _vadSilenceTimeout = Duration(seconds: 2);
 
   @override
   void initState() {
     super.initState();
     _wakeWordService = WakeWordService(onWakeWord: _onWakeWordDetected);
+    _cobraVADService = CobraVADService(onVad: _onVadDetected);
     _initServices();
-
     _startBlinking();
     _setupAudioPlayerListener();
     _log.info('ChatBotFace initialized.');
@@ -69,33 +75,77 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   Future<void> _initServices() async {
     try {
       await _wakeWordService.init();
-      final status = await Permission.microphone.request();
-      if (!status.isGranted) {
-        _log.warning('Microphone permission denied. Cannot start services.');
-        setState(() {
-          _responseMessage = 'Microphone permission denied.';
-        });
-        return;
-      }
-      await _wakeWordService.start();
-      setState(() {
-        _isListeningForWakeWord = true;
-        _responseMessage = 'Listening for wake word...';
-      });
+      await _cobraVADService.init(picovoiceAccessKey);
+      await _startWakeWordListening();
     } catch (e) {
-      _log.severe('Failed to start services on init: $e');
+      _log.severe('Failed to initialize services: $e');
       setState(() {
-        _responseMessage = 'Could not start services.';
+        _responseMessage = 'Failed to initialize services.';
       });
     }
   }
 
-  void _onWakeWordDetected(int keywordIndex) {
+  Future<void> _startWakeWordListening() async {
+    final status = await Permission.microphone.request();
+    if (!status.isGranted) {
+      _log.warning('Microphone permission denied.');
+      setState(() {
+        _responseMessage = 'Microphone permission denied.';
+      });
+      return;
+    }
+    try {
+      await _wakeWordService.start();
+      setState(() {
+        _isListening = true;
+        _responseMessage = 'Listening for wake word...';
+      });
+      _log.info("Wake word engine started.");
+    } catch (e) {
+      _log.severe("Failed to start wake word listener: $e");
+    }
+  }
+
+  Future<void> _stopWakeWordListening() async {
+    try {
+      await _wakeWordService.stop();
+      setState(() {
+        _isListening = false;
+      });
+      _log.info("Wake word engine stopped.");
+    } catch (e) {
+      _log.severe("Failed to stop wake word listener: $e");
+    }
+  }
+
+  void _onWakeWordDetected(int keywordIndex) async {
     _log.info(">>>>>> WAKE WORD DETECTED! <<<<<<");
+    await _stopWakeWordListening();
+
+    // Handoff to VAD
+    await _cobraVADService.start();
     setState(() {
-      _isListeningForWakeWord = false;
-      _responseMessage = "Wake word detected! Press mic to record.";
+      _responseMessage = "Wake word detected! Speak now.";
     });
+    _log.info("Cobra VAD started.");
+  }
+
+  void _onVadDetected(double voiceProbability) {
+    _log.info("VAD Probability: $voiceProbability");
+    if (_isRecording) {
+      // While recording, VAD just resets the silence timer
+      if (voiceProbability > 0.5) {
+        _vadSilenceTimer?.cancel();
+        _vadSilenceTimer = Timer(_vadSilenceTimeout, _stopRecording);
+      }
+      return;
+    }
+
+    if (voiceProbability > 0.5 && !_isVoiceDetected) {
+      _log.info("Voice detected, starting recording...");
+      setState(() => _isVoiceDetected = true);
+      _startRecording();
+    }
   }
 
   void _setupAudioPlayerListener() {
@@ -117,76 +167,57 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   }
 
   Future<void> _handleMicPressed() async {
-    if (_isRecording) {
-      await _stopRecording();
-    } else if (!_isListeningForWakeWord) {
-      await _startRecording();
+    if (_isListening) {
+      await _stopWakeWordListening();
+      setState(() => _responseMessage = "Services stopped.");
     } else {
-      // Toggle wake word listening
-      if (_isListeningForWakeWord) {
-        await _wakeWordService.stop();
-        setState(() {
-          _isListeningForWakeWord = false;
-          _responseMessage = 'Ready to listen...';
-        });
-      } else {
-        try {
-          await _wakeWordService.start();
-          setState(() {
-            _isListeningForWakeWord = true;
-            _responseMessage = 'Listening for wake word...';
-          });
-        } catch (e) {
-          _log.severe('Error starting wake word listener: $e');
-          setState(() {
-            _responseMessage = 'Error: Could not start listener.';
-          });
-        }
-      }
+      await _startWakeWordListening();
     }
   }
 
-  Future<void> _startRecording() async {
-    try {
-      _audioBuffer.clear();
-      _voiceProcessor?.addFrameListener(_voiceProcessorFrameListener);
-      // These values should be based on what the gRPC server expects.
-      // Using common values for now.
-      await _voiceProcessor?.start(512, 16000);
-      setState(() {
-        _isRecording = true;
-        _responseMessage = 'Recording... Press mic to stop.';
-      });
-      _log.info('Recording started for STT.');
-    } catch (e) {
-      _log.severe('Error starting recording: $e');
-    }
+  void _startRecording() async {
+    _audioBuffer.clear();
+    _voiceProcessor?.addFrameListener(_voiceProcessorFrameListener);
+    await _voiceProcessor?.start(512, 16000);
+    setState(() {
+      _isRecording = true;
+      _responseMessage = 'Recording...';
+    });
+    _log.info("Recording started...");
+
+    // Start silence timer
+    _vadSilenceTimer = Timer(_vadSilenceTimeout, _stopRecording);
   }
 
-  Future<void> _stopRecording() async {
+  void _stopRecording() async {
     if (!_isRecording) return;
+    _log.info("Silence timeout, stopping recording.");
 
-    _voiceProcessor?.removeFrameListener(_voiceProcessorFrameListener);
+    _vadSilenceTimer?.cancel();
     await _voiceProcessor?.stop();
+    _voiceProcessor?.removeFrameListener(_voiceProcessorFrameListener);
 
-    setState(() => _isRecording = false);
-    _log.info('Recording stopped. Processing buffered audio.');
+    setState(() {
+      _isRecording = false;
+      _isVoiceDetected = false;
+    });
 
     if (_audioBuffer.isNotEmpty) {
       _processRecordedAudio(_audioBuffer.toList());
-      _audioBuffer.clear();
     }
 
-    // Go back to listening for wake word
-    await _wakeWordService.start();
-    setState(() {
-      _isListeningForWakeWord = true;
-      _responseMessage = 'Listening for wake word...';
-    });
+    // Handoff back to wake word
+    await _cobraVADService.stop();
+    _log.info("Cobra VAD stopped.");
+    await _startWakeWordListening();
   }
 
   void _voiceProcessorFrameListener(List<int> frame) {
-    _audioBuffer.addAll(frame);
+    // While recording, we feed the audio to both the buffer and the VAD
+    if (_isRecording) {
+      _audioBuffer.addAll(frame);
+      _cobraVADService.process(frame);
+    }
   }
 
   Future<void> _processRecordedAudio(List<int> audioData) async {
@@ -200,9 +231,11 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
 
     try {
       const sampleRate = 16000;
+      final pcm16 = Int16List.fromList(audioData);
+      final bytes = pcm16.buffer.asUint8List();
 
-      _log.info('Calling gRPC service with ${audioData.length} bytes of audio data.');
-      final response = await _grpcClient.processSpeech(audioData, sampleRate);
+      _log.info('Calling gRPC service with ${bytes.length} bytes of audio data.');
+      final response = await _grpcClient.processSpeech(bytes, sampleRate);
 
       setState(() {
         _responseMessage = '''Transcribed: ${response.transcribedText}
@@ -287,10 +320,13 @@ LLM Response: ${response.llmResponse}''';
   void dispose() {
     _blinkTimer?.cancel();
     _talkingMouthTimer?.cancel();
+    _vadSilenceTimer?.cancel();
     _grpcClient.shutdown();
     _audioRecorder.dispose();
     _audioPlayer.dispose();
     _wakeWordService.dispose();
+    _cobraVADService.dispose();
+    _voiceProcessor?.removeFrameListener(_voiceProcessorFrameListener);
     _voiceProcessor?.stop();
     _log.info('ChatBotFace disposed, clients and players shut down.');
     super.dispose();
@@ -396,19 +432,13 @@ LLM Response: ${response.llmResponse}''';
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  tooltip: _isRecording
-                      ? 'Stop recording'
-                      : _isListeningForWakeWord
-                          ? 'Listening for wake word...'
-                          : 'Start recording',
+                  tooltip: _isListening
+                      ? 'Listening...'
+                      : 'Services stopped. Tap to start.',
                   iconSize: 36,
                   icon: Icon(
-                    _isRecording || _isListeningForWakeWord
-                        ? Icons.mic
-                        : Icons.mic_none,
-                    color: _isRecording || _isListeningForWakeWord
-                        ? Colors.red
-                        : null,
+                    _isListening ? Icons.mic : Icons.mic_off,
+                    color: _isListening ? Colors.red : null,
                   ),
                   onPressed: _handleMicPressed,
                 ),

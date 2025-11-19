@@ -1,13 +1,13 @@
 import 'package:porcupine_flutter/porcupine_manager.dart';
 import 'package:porcupine_flutter/porcupine_error.dart';
 import 'package:logging/logging.dart';
+import 'package:newbuddy/constants/picovoice.dart';
 
 class WakeWordService {
-  final _log = Logger('GrpcClient');
+  final _log = Logger('WakeWordService');
   PorcupineManager? _porcupineManager;
   final Function(int) _wakeWordCallback;
   bool _isListening = false;
-  static const String _accessKey = "Jkbh1sGP59NpIxkA0douks8GASkQjQZVpiMCL2qGIYBrhw6CmIF/tQ==";
   static const String _keywordAssetPath = "assets/jao-buddy_en_android_v3_0_0.ppn";
 
   bool get isListening => _isListening;
@@ -21,7 +21,7 @@ class WakeWordService {
     }
     try {
       _porcupineManager = await PorcupineManager.fromKeywordPaths(
-        _accessKey,
+        picovoiceAccessKey,
         [_keywordAssetPath],
         _wakeWordCallback,
         errorCallback: _errorCallback,

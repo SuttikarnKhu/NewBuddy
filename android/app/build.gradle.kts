@@ -53,6 +53,10 @@ android {
     }
 }
 
+dependencies {
+    implementation("ai.picovoice:cobra-android:2.1.0")
+}
+
 flutter {
     source = "../.."
 }
