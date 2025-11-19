@@ -1,0 +1,37 @@
+name: newbuddy
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.8.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  zego_uikit: ^2.28.34
+  zego_uikit_prebuilt_call: ^4.21.1
+  zego_uikit_signaling_plugin: ^2.8.19
+  permission_handler: ^12.0.1
+  cupertino_icons: ^1.0.2
+  firebase_core: ^4.2.1
+  cloud_firestore: ^6.1.0
+  shared_preferences: ^2.0.0
+  grpc: ^4.3.1
+  protobuf: ^5.1.0
+  logging: ^1.2.0
+  record: 6.1.2
+  porcupine_flutter: ^3.0.6
+  flutter_voice_processor: ^1.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  protoc_plugin: ^24.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/jao-buddy_en_android_v3_0_0.ppn
+    - assets/logo.png

@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package speech;
+
+service SpeechService {
+  rpc ProcessSpeech (stream AudioRequest) returns (stream AudioResponse) {}
+}
+
+message AudioRequest {
+  bytes audio_data = 1;
+  int32 sample_rate = 2;
+}
+
+message AudioResponse {
+  bytes audio_data = 1;
+  string transcribed_text = 2;
+  string llm_response = 3;
+}
