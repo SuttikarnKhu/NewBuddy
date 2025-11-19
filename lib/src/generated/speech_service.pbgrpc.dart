@@ -32,11 +32,11 @@ class SpeechServiceClient extends $grpc.Client {
 
   SpeechServiceClient(super.channel, {super.options, super.interceptors});
 
-  $grpc.ResponseFuture<$0.AudioResponse> processSpeech(
-    $0.AudioRequest request, {
+  $grpc.ResponseStream<$0.AudioResponse> processSpeech(
+    $async.Stream<$0.AudioRequest> request, {
     $grpc.CallOptions? options,
   }) {
-    return $createUnaryCall(_$processSpeech, request, options: options);
+    return $createStreamingCall(_$processSpeech, request, options: options);
   }
 
   // method descriptors
@@ -55,18 +55,13 @@ abstract class SpeechServiceBase extends $grpc.Service {
   SpeechServiceBase() {
     $addMethod($grpc.ServiceMethod<$0.AudioRequest, $0.AudioResponse>(
         'ProcessSpeech',
-        processSpeech_Pre,
-        false,
-        false,
+        processSpeech,
+        true,
+        true,
         ($core.List<$core.int> value) => $0.AudioRequest.fromBuffer(value),
         ($0.AudioResponse value) => value.writeToBuffer()));
   }
 
-  $async.Future<$0.AudioResponse> processSpeech_Pre(
-      $grpc.ServiceCall $call, $async.Future<$0.AudioRequest> $request) async {
-    return processSpeech($call, await $request);
-  }
-
-  $async.Future<$0.AudioResponse> processSpeech(
-      $grpc.ServiceCall call, $0.AudioRequest request);
+  $async.Stream<$0.AudioResponse> processSpeech(
+      $grpc.ServiceCall call, $async.Stream<$0.AudioRequest> request);
 }

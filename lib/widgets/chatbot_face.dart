@@ -48,6 +48,8 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   late final CobraVADService _cobraVADService;
   final List<int> _audioBuffer = [];
   final VoiceProcessor? _voiceProcessor = VoiceProcessor.instance;
+  StreamController<List<int>>? _audioStreamController;
+  StreamSubscription? _grpcStreamSubscription;
 
   bool _isListening = false;
   bool _isTalking = false;
@@ -177,11 +179,47 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
 
   void _startRecording() async {
     _audioBuffer.clear();
+    
+    // Initialize stream controller for gRPC
+    _audioStreamController = StreamController<List<int>>();
+    
+    // Start the bidirectional stream
+    try {
+      _log.info("Starting gRPC speech stream...");
+      final responseStream = _grpcClient.processSpeechStream(_audioStreamController!.stream, 16000);
+      
+      _grpcStreamSubscription = responseStream.listen(
+        (response) {
+          _log.info("Received stream response: ${response.transcribedText}");
+          setState(() {
+            _responseMessage = 'Transcribed: ${response.transcribedText}\nLLM: ${response.llmResponse}';
+            _isProcessingGrpc = false; // Ensure spinner is off if it was on
+          });
+          
+          if (response.audioData.isNotEmpty) {
+             _playAudioResponse(response.audioData);
+          }
+        },
+        onError: (e) {
+          _log.severe('gRPC stream error: $e');
+          setState(() => _responseMessage = 'Error: $e');
+        },
+        onDone: () {
+          _log.info('gRPC stream closed by server.');
+        },
+      );
+    } catch (e) {
+      _log.severe('Failed to start gRPC stream: $e');
+       setState(() => _responseMessage = 'Connection failed.');
+       return;
+    }
+
     _voiceProcessor?.addFrameListener(_voiceProcessorFrameListener);
     await _voiceProcessor?.start(512, 16000);
     setState(() {
       _isRecording = true;
       _responseMessage = 'Recording...';
+      _isProcessingGrpc = true; // Optional: Show processing state while streaming
     });
     _log.info("Recording started...");
 
@@ -197,14 +235,20 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     await _voiceProcessor?.stop();
     _voiceProcessor?.removeFrameListener(_voiceProcessorFrameListener);
 
+    // Close the stream to signal end of audio to server
+    if (_audioStreamController != null && !_audioStreamController!.isClosed) {
+      await _audioStreamController!.close();
+      _log.info("Audio stream closed.");
+    }
+    // Note: We do NOT cancel _grpcStreamSubscription here immediately, 
+    // because the server might still be sending the final response.
+    // It will complete on its own or we can cancel it when we start a new session.
+
     setState(() {
       _isRecording = false;
       _isVoiceDetected = false;
+      // _isProcessingGrpc = false; // Keep true if waiting for final response?
     });
-
-    if (_audioBuffer.isNotEmpty) {
-      _processRecordedAudio(_audioBuffer.toList());
-    }
 
     // Handoff back to wake word
     await _cobraVADService.stop();
@@ -215,46 +259,19 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   void _voiceProcessorFrameListener(List<int> frame) {
     // While recording, we feed the audio to both the buffer and the VAD
     if (_isRecording) {
-      _audioBuffer.addAll(frame);
+      // _audioBuffer.addAll(frame); // Buffer is less critical now, but good for debug
       _cobraVADService.process(frame);
-    }
-  }
 
-  Future<void> _processRecordedAudio(List<int> audioData) async {
-    if (_isProcessingGrpc) return;
-
-    setState(() {
-      _isProcessingGrpc = true;
-      _responseMessage = 'Processing audio...';
-    });
-    _log.info('UI State: Processing audio for gRPC...');
-
-    try {
-      const sampleRate = 16000;
-      final pcm16 = Int16List.fromList(audioData);
-      final bytes = pcm16.buffer.asUint8List();
-
-      _log.info('Calling gRPC service with ${bytes.length} bytes of audio data.');
-      final response = await _grpcClient.processSpeech(bytes, sampleRate);
-
-      setState(() {
-        _responseMessage = '''Transcribed: ${response.transcribedText}
-LLM Response: ${response.llmResponse}''';
-        _isProcessingGrpc = false;
-      });
-      _log.info('UI State: gRPC response received.');
-
-      if (response.audioData.isNotEmpty) {
-        _playAudioResponse(response.audioData);
+      // Convert Int16 PCM to Bytes for gRPC stream
+      if (_audioStreamController != null && !_audioStreamController!.isClosed) {
+         final pcm16 = Int16List.fromList(frame);
+         final bytes = pcm16.buffer.asUint8List();
+         _audioStreamController!.add(bytes);
       }
-    } catch (e) {
-      setState(() {
-        _responseMessage = 'Error: $e';
-        _isProcessingGrpc = false;
-      });
-      _log.severe('UI State: gRPC call error: $e', e);
     }
   }
+
+
 
   Future<void> _playAudioResponse(List<int> pcmBytes) async {
     _log.info('Preparing to play ${pcmBytes.length} bytes of PCM audio.');
@@ -321,6 +338,7 @@ LLM Response: ${response.llmResponse}''';
     _blinkTimer?.cancel();
     _talkingMouthTimer?.cancel();
     _vadSilenceTimer?.cancel();
+    _grpcStreamSubscription?.cancel(); // Cancel stream subscription
     _grpcClient.shutdown();
     _audioRecorder.dispose();
     _audioPlayer.dispose();

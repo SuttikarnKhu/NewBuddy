@@ -3,7 +3,7 @@ syntax = "proto3";
 package speech;
 
 service SpeechService {
-  rpc ProcessSpeech (AudioRequest) returns (AudioResponse) {}
+  rpc ProcessSpeech (stream AudioRequest) returns (stream AudioResponse) {}
 }
 
 message AudioRequest {

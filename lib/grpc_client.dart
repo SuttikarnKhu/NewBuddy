@@ -53,15 +53,17 @@ o8qBuh3U6r8u0DVPSIJdr3uy/cGzl8jTsU4DYwJLTCK7Rw==
     _log.info('gRPC client initialized');
   }
 
-  Future<AudioResponse> processSpeech(List<int> audioData, int sampleRate) async {
-    final request = AudioRequest(audioData: audioData, sampleRate: sampleRate);
-    _log.info('Sending audio data to server...');
+  Stream<AudioResponse> processSpeechStream(Stream<List<int>> audioDataStream, int sampleRate) {
+    final requestStream = audioDataStream.map((audioChunk) {
+      return AudioRequest(audioData: audioChunk, sampleRate: sampleRate);
+    });
+
+    _log.info('Starting bidirectional speech stream...');
     try {
-      final response = await _stub.processSpeech(request);
-      _log.info('Received response: Transcribed text - ${response.transcribedText}, LLM response - ${response.llmResponse}');
-      return response;
+      final responseStream = _stub.processSpeech(requestStream);
+      return responseStream;
     } catch (e) {
-      _log.severe('Error calling gRPC service: $e');
+      _log.severe('Error starting gRPC stream: $e');
       rethrow;
     }
   }
