@@ -8,6 +8,7 @@ class FirebaseService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static UserModel? _currentUser;
   static String? _caregiverId;
+  static String? _caregiverName;
 
   static UserModel get currentUserModel {
     if (_currentUser == null) {
@@ -33,25 +34,21 @@ class FirebaseService {
             .collection('buddies')
             .get();
         
-        for (final buddyDoc in buddiesSnapshot.docs) {
-          final data = buddyDoc.data();
-          final buddyID = data['buddyID'] as String?;
+        if (buddyDoc.exists) {
+          print('✅ Found buddy in caregiver: ${caregiverDoc.id}');
+          _caregiverId = caregiverDoc.id;
           
-          if (buddyID == userId) {
-            print('✅ Found buddy in caregiver: ${caregiverDoc.id}');
-            _caregiverId = caregiverDoc.id;
-            
-            _currentUser = UserModel(
-              id: buddyID ?? userId,
-              name: data['name'] ?? '',
-              gender: data['gender'] ?? '',
-              age: data['age'] is String ? int.tryParse(data['age']) ?? 0 : data['age'] ?? 0,
-              preference: data['role'] ?? '',
-            );
-            
-            print('Successfully loaded buddy: ${_currentUser!.name}');
-            return _currentUser;
-          }
+          final data = buddyDoc.data()!;
+          _currentUser = UserModel(
+            id: buddyDoc.id,
+            name: data['name'] ?? '',
+            gender: data['gender'] ?? '',
+            age: data['age'] is String ? int.tryParse(data['age']) ?? 0 : data['age'] ?? 0,
+            preference: data['role'] ?? '',
+          );
+          
+          print('Successfully loaded user: ${_currentUser!.name}');
+          return _currentUser;
         }
       }
       
@@ -71,6 +68,7 @@ class FirebaseService {
   static void clearCurrentUser() {
     _currentUser = null;
     _caregiverId = null;
+    _caregiverName = null;
   }
 
   // Test database connection
@@ -130,4 +128,5 @@ class FirebaseService {
 
   // Get caregiver ID
   static String? get caregiverId => _caregiverId;
+  static String? get caregiverName => _caregiverName;
 }

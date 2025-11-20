@@ -10,6 +10,7 @@
 // ignore_for_file: deprecated_member_use_from_same_package, library_prefixes
 // ignore_for_file: non_constant_identifier_names
 
+import 'dart:async' as $async;
 import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
@@ -20,10 +21,14 @@ class AudioRequest extends $pb.GeneratedMessage {
   factory AudioRequest({
     $core.List<$core.int>? audioData,
     $core.int? sampleRate,
+    $core.String? uid,
+    $core.String? buddyId,
   }) {
     final result = create();
     if (audioData != null) result.audioData = audioData;
     if (sampleRate != null) result.sampleRate = sampleRate;
+    if (uid != null) result.uid = uid;
+    if (buddyId != null) result.buddyId = buddyId;
     return result;
   }
 
@@ -43,6 +48,8 @@ class AudioRequest extends $pb.GeneratedMessage {
     ..a<$core.List<$core.int>>(
         1, _omitFieldNames ? '' : 'audioData', $pb.PbFieldType.OY)
     ..aI(2, _omitFieldNames ? '' : 'sampleRate')
+    ..aOS(3, _omitFieldNames ? '' : 'uid')
+    ..aOS(4, _omitFieldNames ? '' : 'buddyId')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -81,6 +88,24 @@ class AudioRequest extends $pb.GeneratedMessage {
   $core.bool hasSampleRate() => $_has(1);
   @$pb.TagNumber(2)
   void clearSampleRate() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.String get uid => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set uid($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasUid() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearUid() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.String get buddyId => $_getSZ(3);
+  @$pb.TagNumber(4)
+  set buddyId($core.String value) => $_setString(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasBuddyId() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearBuddyId() => $_clearField(4);
 }
 
 class AudioResponse extends $pb.GeneratedMessage {
@@ -88,11 +113,13 @@ class AudioResponse extends $pb.GeneratedMessage {
     $core.List<$core.int>? audioData,
     $core.String? transcribedText,
     $core.String? llmResponse,
+    $core.bool? triggerCall,
   }) {
     final result = create();
     if (audioData != null) result.audioData = audioData;
     if (transcribedText != null) result.transcribedText = transcribedText;
     if (llmResponse != null) result.llmResponse = llmResponse;
+    if (triggerCall != null) result.triggerCall = triggerCall;
     return result;
   }
 
@@ -113,6 +140,7 @@ class AudioResponse extends $pb.GeneratedMessage {
         1, _omitFieldNames ? '' : 'audioData', $pb.PbFieldType.OY)
     ..aOS(2, _omitFieldNames ? '' : 'transcribedText')
     ..aOS(3, _omitFieldNames ? '' : 'llmResponse')
+    ..aOB(4, _omitFieldNames ? '' : 'triggerCall')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -160,6 +188,26 @@ class AudioResponse extends $pb.GeneratedMessage {
   $core.bool hasLlmResponse() => $_has(2);
   @$pb.TagNumber(3)
   void clearLlmResponse() => $_clearField(3);
+
+  @$pb.TagNumber(4)
+  $core.bool get triggerCall => $_getBF(3);
+  @$pb.TagNumber(4)
+  set triggerCall($core.bool value) => $_setBool(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasTriggerCall() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearTriggerCall() => $_clearField(4);
+}
+
+class SpeechServiceApi {
+  final $pb.RpcClient _client;
+
+  SpeechServiceApi(this._client);
+
+  $async.Future<AudioResponse> processSpeech(
+          $pb.ClientContext? ctx, AudioRequest request) =>
+      _client.invoke<AudioResponse>(
+          ctx, 'SpeechService', 'ProcessSpeech', request, AudioResponse());
 }
 
 const $core.bool _omitFieldNames =

@@ -39,6 +39,23 @@ class CobraVADService {
     }
   }
 
+  Future<void> startManual() async {
+    try {
+      _vadSubscription = _eventChannel.receiveBroadcastStream().cast<double>().listen(
+        (voiceProbability) {
+          _vadCallback(voiceProbability);
+        },
+        onError: (error) {
+          _log.severe("VAD event channel error: $error");
+        },
+      );
+      // Do NOT invoke 'startCobra' here. We only want to listen to events from manual processing.
+      _log.info('Cobra VAD started (Manual Mode) and listening to events.');
+    } on PlatformException catch (e) {
+      _log.severe('Failed to start Cobra VAD (Manual): ${e.message}');
+    }
+  }
+
   Future<void> process(List<int> frame) async {
     try {
       // Convert List<int> (which is int16) to Uint8List (byte array)
