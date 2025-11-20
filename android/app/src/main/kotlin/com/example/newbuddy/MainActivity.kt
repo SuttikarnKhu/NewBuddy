@@ -15,6 +15,8 @@ import ai.picovoice.cobra.CobraException
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 class MainActivity : FlutterActivity() {
     private val METHOD_CHANNEL_NAME = "com.example.newbuddy/cobra_vad"
@@ -46,6 +48,27 @@ class MainActivity : FlutterActivity() {
                     "stopCobra" -> {
                         stopVAD()
                         result.success(null)
+                    }
+                    "process" -> {
+                        try {
+                            val frame = call.argument<ByteArray>("frame")!!
+                            if (cobra != null) {
+                                val pcm = ShortArray(frame.size / 2)
+                                ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(pcm)
+                                
+                                val voiceProbability = cobra!!.process(pcm)
+                                runOnUiThread {
+                                    eventSink?.success(voiceProbability)
+                                }
+                                result.success(null)
+                            } else {
+                                result.error("CobraNotInitialized", "Cobra engine is not initialized", null)
+                            }
+                        } catch (e: CobraException) {
+                            result.error("CobraException", e.message, null)
+                        } catch (e: Exception) {
+                            result.error("ProcessError", e.message, null)
+                        }
                     }
                     "disposeCobra" -> {
                         cobra?.delete()

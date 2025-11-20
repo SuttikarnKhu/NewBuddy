@@ -53,9 +53,15 @@ o8qBuh3U6r8u0DVPSIJdr3uy/cGzl8jTsU4DYwJLTCK7Rw==
     _log.info('gRPC client initialized');
   }
 
-  Stream<AudioResponse> processSpeechStream(Stream<List<int>> audioDataStream, int sampleRate) {
+  Stream<AudioResponse> processSpeechStream(Stream<List<int>> audioDataStream, int sampleRate, String uid, String buddyId) {
+    bool isFirstChunk = true;
     final requestStream = audioDataStream.map((audioChunk) {
-      return AudioRequest(audioData: audioChunk, sampleRate: sampleRate);
+      if (isFirstChunk) {
+        isFirstChunk = false;
+        return AudioRequest(audioData: audioChunk, sampleRate: sampleRate, uid: uid, buddyId: buddyId);
+      } else {
+        return AudioRequest(audioData: audioChunk, sampleRate: sampleRate);
+      }
     });
 
     _log.info('Starting bidirectional speech stream...');

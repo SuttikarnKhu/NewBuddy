@@ -8,6 +8,7 @@ class FirebaseService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static UserModel? _currentUser;
   static String? _caregiverId;
+  static String? _caregiverName;
 
   static UserModel get currentUserModel {
     if (_currentUser == null) {
@@ -38,6 +39,7 @@ class FirebaseService {
         if (buddyDoc.exists) {
           print('✅ Found buddy in caregiver: ${caregiverDoc.id}');
           _caregiverId = caregiverDoc.id;
+          _caregiverName = caregiverDoc.data()['name'];
           
           final data = buddyDoc.data()!;
           _currentUser = UserModel(
@@ -69,6 +71,7 @@ class FirebaseService {
   static void clearCurrentUser() {
     _currentUser = null;
     _caregiverId = null;
+    _caregiverName = null;
   }
 
   // Test database connection
@@ -128,4 +131,5 @@ class FirebaseService {
 
   // Get caregiver ID
   static String? get caregiverId => _caregiverId;
+  static String? get caregiverName => _caregiverName;
 }
