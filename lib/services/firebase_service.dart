@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:newbuddy/model/user.dart';
 
@@ -6,6 +7,7 @@ ValueNotifier<FirebaseService> firebaseService = ValueNotifier(FirebaseService()
 
 class FirebaseService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static final FirebaseAuth _auth = FirebaseAuth.instance;
   static UserModel? _currentUser;
   static String? _caregiverId;
   static String? _caregiverName;
@@ -22,9 +24,14 @@ class FirebaseService {
   // Get user by ID from Firestore (searches across all caregivers' buddies)
   static Future<UserModel?> getUserById(String buddyId) async {
     try {
+      // Ensure we are authenticated (Anonymous Auth for Buddy App)
+      if (_auth.currentUser == null) {
+        print('Signing in anonymously...');
+        await _auth.signInAnonymously();
+        print('Signed in anonymously as ${_auth.currentUser?.uid}');
+      }
       print('Searching for buddy with ID: $buddyId');
       
-      // Since collectionGroup requires wildcard permission, search through caregivers instead
       // Step 1: Get all caregivers
       final caregiversSnapshot = await _firestore.collection('caregivers').get();
       print('Searching through ${caregiversSnapshot.docs.length} caregivers...');
@@ -37,7 +44,7 @@ class FirebaseService {
             .get();
         
         if (buddyDoc.exists) {
-          print('✅ Found buddy in caregiver: ${caregiverDoc.id}');
+          print('Found buddy in caregiver: ${caregiverDoc.id}');
           _caregiverId = caregiverDoc.id;
           _caregiverName = caregiverDoc.data()['name'];
           
@@ -55,7 +62,7 @@ class FirebaseService {
         }
       }
       
-      print('❌ Buddy not found in any caregiver');
+      print('Buddy not found in any caregiver');
       return null;
     } catch (e) {
       print('Error getting user by ID: $e');
@@ -77,44 +84,29 @@ class FirebaseService {
   // Test database connection
   static Future<bool> testDatabaseConnection() async {
     try {
-      // Test 1: Try collectionGroup query
-      print('Testing collectionGroup query...');
-      final collectionGroupSnapshot = await _firestore
-          .collectionGroup('buddies')
+      // Test 1: Try direct path query (which works without indices usually)
+      print('Testing direct caregiver query...');
+      final caregiversSnapshot = await _firestore
+          .collection('caregivers')
           .limit(1)
           .get();
-      print('✅ CollectionGroup query successful! Found ${collectionGroupSnapshot.docs.length} buddies');
+      print('Direct caregiver query successful! Found ${caregiversSnapshot.docs.length} caregivers');
       
-      return true;
-    } catch (e) {
-      print('❌ CollectionGroup query failed: $e');
-      
-      // Test 2: Try direct path query
-      try {
-        print('Testing direct caregiver query...');
-        final caregiversSnapshot = await _firestore
+      if (caregiversSnapshot.docs.isNotEmpty) {
+        final caregiverId = caregiversSnapshot.docs.first.id;
+        print('Testing buddies subcollection for caregiver: $caregiverId');
+        final buddiesSnapshot = await _firestore
             .collection('caregivers')
+            .doc(caregiverId)
+            .collection('buddies')
             .limit(1)
             .get();
-        print('✅ Direct caregiver query successful! Found ${caregiversSnapshot.docs.length} caregivers');
-        
-        if (caregiversSnapshot.docs.isNotEmpty) {
-          final caregiverId = caregiversSnapshot.docs.first.id;
-          print('Testing buddies subcollection for caregiver: $caregiverId');
-          final buddiesSnapshot = await _firestore
-              .collection('caregivers')
-              .doc(caregiverId)
-              .collection('buddies')
-              .limit(1)
-              .get();
-          print('✅ Buddies subcollection query successful! Found ${buddiesSnapshot.docs.length} buddies');
-        }
-        
-        return true;
-      } catch (e2) {
-        print('❌ Direct query also failed: $e2');
-        return false;
+        print('Buddies subcollection query successful! Found ${buddiesSnapshot.docs.length} buddies');
       }
+      return true;
+    } catch (e) {
+      print('Database connection test failed: $e');
+      return false;
     }
   }
 

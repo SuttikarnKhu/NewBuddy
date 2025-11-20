@@ -12,6 +12,7 @@ import 'package:newbuddy/src/cobra_vad_service.dart';
 import 'package:newbuddy/constants/picovoice.dart';
 import 'package:flutter_voice_processor/flutter_voice_processor.dart';
 import 'package:newbuddy/services/firebase_service.dart';
+import 'package:newbuddy/services/reminder_service.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:zego_uikit/zego_uikit.dart';
 
@@ -321,11 +322,14 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       final buddyId = FirebaseService.currentUserModel.id;
       final caregiverId = FirebaseService.caregiverId ?? 'unknown_caregiver';
       
+      final activeReminders = ReminderService.instance.getActiveRemindersText();
+
       final responseStream = _grpcClient.processSpeechStream(
         _audioStreamController!.stream, 
         16000,
         caregiverId,
-        buddyId
+        buddyId,
+        activeReminders
       );
       
       _grpcStreamSubscription = responseStream.listen(
