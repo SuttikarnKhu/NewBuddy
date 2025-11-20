@@ -4,6 +4,8 @@ import 'package:newbuddy/screens/home_screen.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:newbuddy/constants/app_config.dart';
 import 'package:zego_uikit_signaling_plugin/zego_uikit_signaling_plugin.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class IdInputScreen extends StatefulWidget {
   const IdInputScreen({super.key});
@@ -119,6 +121,15 @@ class _IdInputScreenState extends State<IdInputScreen> {
         _isLoading = true;
       });
 
+      // Save user info to SharedPreferences for auto-login
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('userID', user.id);
+      await prefs.setString('userName', user.name);
+
+      // Request permissions
+      await Permission.systemAlertWindow.request();
+      await Permission.notification.request();
+
       // Initialize Zego call service
       await ZegoUIKitPrebuiltCallInvitationService().init(
         appID: AppConfig.appID,
@@ -126,6 +137,26 @@ class _IdInputScreenState extends State<IdInputScreen> {
         userID: user.id,
         userName: user.name,
         plugins: [ZegoUIKitSignalingPlugin()],
+        notificationConfig: ZegoCallInvitationNotificationConfig(
+          androidNotificationConfig: ZegoCallAndroidNotificationConfig(
+            showFullScreen: true,
+            channelID: "ZegoUIKit",
+            channelName: "Call Notifications",
+            sound: "call_ringtone",
+            vibrate: true,
+          ),
+        ),
+        requireConfig: (ZegoCallInvitationData data) {
+          var config = (data.invitees.length > 1)
+              ? ZegoCallType.videoCall == data.type
+                  ? ZegoUIKitPrebuiltCallConfig.groupVideoCall()
+                  : ZegoUIKitPrebuiltCallConfig.groupVoiceCall()
+              : ZegoCallType.videoCall == data.type
+                  ? ZegoUIKitPrebuiltCallConfig.oneOnOneVideoCall()
+                  : ZegoUIKitPrebuiltCallConfig.oneOnOneVoiceCall();
+          
+          return config;
+        },
       );
 
       // Navigate to home screen
@@ -185,7 +216,7 @@ class _IdInputScreenState extends State<IdInputScreen> {
             ),
             const SizedBox(height: 16),
             const Text(
-              'Please enter the ID provided by your administrator',
+              'Please enter your Buddy ID',
               style: TextStyle(
                 fontSize: 14,
                 color: Colors.grey,
