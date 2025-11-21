@@ -14,6 +14,24 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  
+  @override
+  void initState() {
+    super.initState();
+    _initReminders();
+  }
+
+  Future<void> _initReminders() async {
+    await ReminderService.instance.init();
+    ReminderService.instance.startListening();
+  }
+
+  @override
+  void dispose() {
+    ReminderService.instance.stopListening();
+    super.dispose();
+  }
+
   Future<void> _signOut() async {
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
@@ -58,29 +76,6 @@ class _HomeScreenState extends State<HomeScreen> {
         MaterialPageRoute(builder: (_) => const IdInputScreen()),
       );
     }
-  }
-
-  @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-  
-  @override
-  void initState() {
-    super.initState();
-    _initReminders();
-  }
-
-  Future<void> _initReminders() async {
-    await ReminderService.instance.init();
-    ReminderService.instance.startListening();
-  }
-
-  @override
-  void dispose() {
-    ReminderService.instance.stopListening();
-    super.dispose();
   }
 
   @override

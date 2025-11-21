@@ -180,6 +180,6 @@ class ReminderService {
       final description = data['description'] ?? '';
       formattedReminders.add('$title เวลา $time ($description)');
     }
-    return "บั๊ดดี้ทราบข้อมูลการแจ้งเตือนปัจจุบันดังนี้: " + formattedReminders.join('; ') + "ครับ";
+    return "บั๊ดดี้ทราบข้อมูลการแจ้งเตือนปัจจุบันดังนี้: ${formattedReminders.join('; ')}ครับ";
   }
 }

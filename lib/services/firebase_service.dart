@@ -38,13 +38,16 @@ class FirebaseService {
       print('Searching through ${caregiversSnapshot.docs.length} caregivers...');
       
       for (final caregiverDoc in caregiversSnapshot.docs) {
-        final buddiesSnapshot = await caregiverDoc.reference
+        final buddyDoc = await caregiverDoc.reference
             .collection('buddies')
+            .doc(userId)
             .get();
         
         if (buddyDoc.exists) {
           print('Found buddy in caregiver: ${caregiverDoc.id}');
           _caregiverId = caregiverDoc.id;
+          final caregiverData = caregiverDoc.data();
+          _caregiverName = caregiverData['name']; // Fetch caregiver name
           
           final data = buddyDoc.data()!;
           _currentUser = UserModel(
