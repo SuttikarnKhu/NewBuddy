@@ -72,7 +72,13 @@ o8qBuh3U6r8u0DVPSIJdr3uy/cGzl8jTsU4DYwJLTCK7Rw==
 
     _log.info('Starting bidirectional speech stream...');
     try {
-      final responseStream = _stub.processSpeech(requestStream);
+      // Add metadata to the call
+      final options = CallOptions(metadata: {
+        'uid': uid,
+        'buddy_id': buddyId,
+      });
+      
+      final responseStream = _stub.processSpeech(requestStream, options: options);
       return responseStream;
     } catch (e) {
       _log.severe('Error starting gRPC stream: $e');

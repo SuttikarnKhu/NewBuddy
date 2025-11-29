@@ -81,8 +81,8 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   Timer? _callCheckTimer; 
   Timer? _postPlaybackMuteTimer; // Declared at class level
   
-  static const Duration _vadSilenceTimeout = Duration(seconds: 4);
-  static const Duration _sessionTimeout = Duration(seconds: 6);
+  static const Duration _vadSilenceTimeout = Duration(seconds: 2);
+  static const Duration _sessionTimeout = Duration(seconds: 5);
 
   @override
   void initState() {
@@ -225,7 +225,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     }
 
     try {
-       await _cobraVADService.start(); 
+       await _cobraVADService.startManual(); 
        
        _voiceProcessor?.removeFrameListener(_onAudioFrame); 
        _voiceProcessor?.addFrameListener(_onAudioFrame);
@@ -298,6 +298,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
         _isVoiceDetected = false;
         _isRecording = false; 
         _isProcessingGrpc = false;
+        _isBlushing = false;
       });
     }
     
@@ -318,14 +319,14 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     }
 
     if (_isRecording) {
-      if (voiceProbability > 0.7) {
+      if (voiceProbability > 0.85) {
         _vadSilenceTimer?.cancel();
         _vadSilenceTimer = Timer(_vadSilenceTimeout, _stopRecording);
       }
       return;
     }
 
-    if (_isSessionActive && voiceProbability > 0.5 && !_isVoiceDetected) {
+    if (_isSessionActive && voiceProbability > 0.85 && !_isVoiceDetected) {
       _log.info("Voice detected in session, starting recording...");
       
       _sessionExpiryTimer?.cancel(); 
@@ -380,7 +381,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
                    _pendingCall = false;
                    await _initiateCall();
                } else if (_isSessionActive) {
-                   _resumeSessionListening(); 
+                   _endSession();
                }
             });
         }
@@ -409,6 +410,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
             _voiceProcessor?.removeFrameListener(_onAudioFrame); 
             _voiceProcessor?.addFrameListener(_onAudioFrame);
             _isListenerAttached = true;
+            _resetSessionTimer();
             _log.info("Listener attached. Ready for user input.");
         }
         
@@ -437,6 +439,8 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   }
 
   void _startRecording() async {
+    if (_isRecording) return; // Prevent double triggering
+
     _audioBuffer.clear();
     // Do NOT reset pendingCall here; it comes from stream logic
     
@@ -448,8 +452,8 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       final buddyId = FirebaseService.currentUserModel.id;
       final caregiverId = FirebaseService.caregiverId;
 
-      if (caregiverId == null || caregiverId == 'unknown_caregiver') {
-        _log.warning("Abort recording: Caregiver ID is unknown.");
+      if (buddyId.isEmpty || caregiverId == null || caregiverId == 'unknown_caregiver') {
+        _log.severe("ABORT: Missing IDs. Buddy: '$buddyId', Caregiver: '$caregiverId'");
         await _audioStreamController?.close();
         if (mounted) {
           setState(() {
@@ -567,7 +571,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
             caregiverName, 
           ),
         ],
-        isVideoCall: false, 
+        isVideoCall: true, 
       );
       _log.info("Zego call invitation sent successfully.");
     } catch (e) {
