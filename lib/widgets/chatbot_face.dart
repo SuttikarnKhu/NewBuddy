@@ -12,6 +12,7 @@ import 'package:newbuddy/src/cobra_vad_service.dart';
 import 'package:newbuddy/constants/picovoice.dart';
 import 'package:flutter_voice_processor/flutter_voice_processor.dart';
 import 'package:newbuddy/services/firebase_service.dart';
+import 'package:newbuddy/services/reminder_service.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import 'package:zego_uikit/zego_uikit.dart';
 
@@ -50,26 +51,38 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   late final CobraVADService _cobraVADService;
   final List<int> _audioBuffer = [];
   final VoiceProcessor? _voiceProcessor = VoiceProcessor.instance;
+  
   StreamController<List<int>>? _audioStreamController;
   StreamSubscription? _grpcStreamSubscription;
+  ValueNotifier<ZegoUIKitRoomState>? _roomStateNotifier; 
+  
   DateTime? _interactionStartTime;
+  DateTime? _lastRecordingEndTime; 
+  bool _isListenerAttached = false; 
 
-  bool _isListening = false; // True if Wake Word service is active
-  bool _isSessionActive = false; // True if in an active interaction session
+  // NUCLEAR LOOP PROTECTION FLAGS
+  bool _isAudioPlaying = false; 
+  bool _postPlaybackCooldown = false;
+
+  bool _isListening = false; 
+  bool _isSessionActive = false; 
   bool _isBlushing = false; 
   bool _isTalking = false;
   bool _eyesClosed = false;
   bool _mouthOpen = false;
-  bool _isRecording = false; // True if currently capturing user audio
+  bool _isRecording = false; 
   bool _isVoiceDetected = false;
+  bool _pendingCall = false; 
 
   Timer? _blinkTimer;
   Timer? _talkingMouthTimer;
   Timer? _vadSilenceTimer;
-  Timer? _sessionExpiryTimer; // Timer for session timeout
+  Timer? _sessionExpiryTimer; 
+  Timer? _callCheckTimer; 
+  Timer? _postPlaybackMuteTimer; // Declared at class level
   
   static const Duration _vadSilenceTimeout = Duration(seconds: 4);
-  static const Duration _sessionTimeout = Duration(seconds: 20);
+  static const Duration _sessionTimeout = Duration(seconds: 6);
 
   @override
   void initState() {
@@ -79,7 +92,78 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     _initServices();
     _startBlinking();
     _setupAudioPlayerListener();
+    
+    // Listen for Zego call events (Room State) using ValueNotifier
+    _roomStateNotifier = ZegoUIKit().getRoomStateStream();
+    _roomStateNotifier?.addListener(_onZegoRoomStateChanged);
+    
     _log.info('ChatBotFace initialized.');
+  }
+
+  Future<void> _restartServices() async {
+      _log.info(">>> RESTARTING SERVICES (Hard Reset) <<<");
+      
+      // 1. Force Stop Everything
+      _sessionExpiryTimer?.cancel();
+      _vadSilenceTimer?.cancel();
+      _callCheckTimer?.cancel(); 
+      _voiceProcessor?.removeFrameListener(_onAudioFrame);
+      _isListenerAttached = false;
+      await _voiceProcessor?.stop();
+      await _cobraVADService.stop();
+      await _wakeWordService.stop();
+
+      // 2. Reset Flags
+      if (mounted) {
+        setState(() {
+          _isSessionActive = false;
+          _isRecording = false;
+          _isVoiceDetected = false;
+          _isProcessingGrpc = false;
+          _isTalking = false;
+          _isBlushing = false;
+          _isListening = false; 
+          _isAudioPlaying = false;
+          _postPlaybackCooldown = false;
+        });
+      }
+
+      // 3. Re-initialize and Start
+      await _initServices();
+      _log.info("Services restarted. Listening for Wake Word.");
+  }
+
+  void _startCallStatusPolling() {
+    _callCheckTimer?.cancel();
+    _callCheckTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+       if (timer.tick < 5) return;
+       
+       if (ZegoUIKit().getRoom().id.isEmpty) {
+          _log.info("Polling: Not in room (ID empty). Call ended. Restarting services.");
+          timer.cancel();
+          _restartServices();
+       }
+    });
+  }
+
+  void _onZegoRoomStateChanged() {
+    final state = _roomStateNotifier?.value;
+    if (state == null) return;
+
+    _log.info("Zego Room State: ${state.reason}");
+    
+    if (state.reason == ZegoRoomStateChangedReason.Logout || 
+        state.reason == ZegoRoomStateChangedReason.KickOut ||
+        state.reason == ZegoRoomStateChangedReason.ReconnectFailed) {
+        
+        _log.info("Call ended detected. Initiating restart sequence...");
+        
+        Future.delayed(const Duration(seconds: 3), () {
+            if (mounted) {
+               _restartServices();
+            }
+        });
+    }
   }
 
   Future<void> _initServices() async {
@@ -100,10 +184,12 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     }
     try {
       await _wakeWordService.start();
-      setState(() {
-        _isListening = true;
-        _isSessionActive = false; // Reset session state
-      });
+      if (mounted) {
+        setState(() {
+          _isListening = true;
+          _isSessionActive = false; // Reset session state
+        });
+      }
       _log.info("Wake word engine started (Session Inactive).");    
     } catch (e) {
       _log.severe("Failed to start wake word listener: $e");
@@ -113,9 +199,11 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   Future<void> _stopWakeWordListening() async {
     try {
       await _wakeWordService.stop();
-      setState(() {
-        _isListening = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isListening = false;
+        });
+      }
       _log.info("Wake word engine stopped.");
     } catch (e) {
       _log.severe("Failed to stop wake word listener: $e");
@@ -130,60 +218,20 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
 
   void _startSession() async {
     _log.info("Starting new session...");
-    setState(() {
-      _isSessionActive = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isSessionActive = true;
+      });
+    }
 
-    // Start VAD listening using VoiceProcessor and Manual Frame Feeding
-    // We do NOT call _cobraVADService.start() because that starts internal recording.
-    // Instead, we use start() of the wrapper to ensure event channel is listening, 
-    // BUT we modified native code to support 'process' method.
-    
-    // Actually, we DO need to call start() on the Dart service wrapper to set up the event listener?
-    // Looking at cobra_vad_service.dart: start() does `_eventChannel...listen` AND `invokeMethod('startCobra')`.
-    // `invokeMethod('startCobra')` starts the native recorder. WE DON'T WANT THAT.
-    
-    // We need to manually set up the listener without starting native recorder.
-    // But `CobraVADService` doesn't expose a method for that.
-    // We should have modified `CobraVADService` to separate `listenEvents` from `startNativeRecorder`.
-    
-    // WORKAROUND: Call start(), but immediately call stop() on native? No.
-    // Native `startCobra` starts the thread.
-    
-    // Better: We should have added `startManual()` to CobraVADService.
-    // Since I can't easily change `CobraVADService` interface safely without potentially breaking other things (though I seem to be the only user), 
-    // let's rely on the fact that `process` works now.
-    
-    // Wait, if I call `_cobraVADService.start()`, it starts native recording.
-    // If I ALSO run `_voiceProcessor`, they conflict.
-    
-    // I need to fix `CobraVADService.dart` to allow listening without starting native recorder.
-    // OR, I just call `start()` and then ignore the fact that it starts a recorder?
-    // No, that causes "Dead IAudioRecord".
-    
-    // I MUST modify `CobraVADService.dart` to split initialization.
-    // OR, I can just duplicate the event listening logic here if `_eventChannel` was public. It's not.
-    
-    // I will use `_cobraVADService.start()` but I rely on my native fix to NOT crash if `process` is called?
-    // No, `start()` starts the native loop which reads from mic.
-    
-    // I will modify `cobra_vad_service.dart` first to add `startManual()`.
-    // Since I am replacing the whole `chatbot_face.dart` file, I will pause this replacement and do `cobra_vad_service.dart` first.
-    
-    // ... But I can't cancel this tool call easily.
-    // I will write the logic assuming `_cobraVADService.startManual()` exists, then I will go implement it.
-    
-    // Actually, I'll stick to `start()` but I will modify `cobra_vad_service.dart` to accept a flag `manual`?
-    
-    // For now, let's write the code assuming `startManual` exists.
-    
     try {
-       // Assuming I add startManual() to CobraVADService
-       await _cobraVADService.startManual(); 
+       await _cobraVADService.start(); 
        
-       _voiceProcessor?.addFrameListener(_vadOnlyFrameListener);
+       _voiceProcessor?.removeFrameListener(_onAudioFrame); 
+       _voiceProcessor?.addFrameListener(_onAudioFrame);
+       _isListenerAttached = true;
        await _voiceProcessor?.start(512, 16000);
-       _log.info("Session VAD listening started (Manual Mode).");
+       _log.info("Session VAD listening started.");
     } catch (e) {
        _log.severe("Error starting session VAD: $e");
     }
@@ -191,9 +239,24 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     _resetSessionTimer();
   }
   
-  void _vadOnlyFrameListener(List<int> frame) {
-      if (!_isRecording && _isSessionActive) {
-          _cobraVADService.process(frame);
+  void _onAudioFrame(List<int> frame) {
+      // 1. ABSOLUTE GATEKEEPER
+      if (_isAudioPlaying || _postPlaybackCooldown) {
+          return; // Drop frame immediately
+      }
+      
+      if (_isTalking) return;
+
+      if (!_isSessionActive) return;
+
+      _cobraVADService.process(frame);
+
+      if (_isRecording) {
+          if (_audioStreamController != null && !_audioStreamController!.isClosed) {
+             final pcm16 = Int16List.fromList(frame);
+             final bytes = pcm16.buffer.asUint8List();
+             _audioStreamController!.add(bytes);
+          }
       }
   }
 
@@ -205,24 +268,55 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     }
   }
 
-  void _endSession() async {
+  void _endSession({bool restartWakeWord = true}) async {
     if (!_isSessionActive) return;
-    _log.info("Session timed out due to inactivity.");
+    _log.info("Ending session. Restart WakeWord: $restartWakeWord");
     
     _sessionExpiryTimer?.cancel();
     
-    _voiceProcessor?.removeFrameListener(_vadOnlyFrameListener);
+    if (_isRecording) {
+      _log.info("Force stopping recording during session end.");
+      _vadSilenceTimer?.cancel();
+      if (_audioStreamController != null && !_audioStreamController!.isClosed) {
+        await _audioStreamController!.close();
+      }
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+        });
+      }
+    }
+    
+    _voiceProcessor?.removeFrameListener(_onAudioFrame);
+    _isListenerAttached = false;
     await _voiceProcessor?.stop();
-    await _cobraVADService.stop(); // Stop listening to events
+    await _cobraVADService.stop(); 
     
-    setState(() {
-      _isSessionActive = false;
-    });
+    if (mounted) {
+      setState(() {
+        _isSessionActive = false;
+        _isVoiceDetected = false;
+        _isRecording = false; 
+        _isProcessingGrpc = false;
+      });
+    }
     
-    await _startWakeWordListening();
+    if (restartWakeWord) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      await _startWakeWordListening();
+    } else {
+      _log.info("Wake Word NOT restarted (likely due to incoming call).");
+    }
   }
 
   void _onVadDetected(double voiceProbability) {
+    if (_isTalking || _isAudioPlaying || _postPlaybackCooldown) return;
+    
+    if (_lastRecordingEndTime != null && 
+        DateTime.now().difference(_lastRecordingEndTime!) < const Duration(milliseconds: 1500)) {
+      return;
+    }
+
     if (_isRecording) {
       if (voiceProbability > 0.7) {
         _vadSilenceTimer?.cancel();
@@ -236,11 +330,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       
       _sessionExpiryTimer?.cancel(); 
       
-      setState(() => _isVoiceDetected = true);
-      
-      // We are already running VoiceProcessor.
-      // We switch mode: Remove VAD-only listener, add Recording listener.
-      _voiceProcessor?.removeFrameListener(_vadOnlyFrameListener);
+      if (mounted) setState(() => _isVoiceDetected = true);
       
       _startRecording();
     }
@@ -248,11 +338,13 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
 
   void _stopAnimation() {
     if (_isTalking) {
-      setState(() {
-        _isTalking = false;
-        _isBlushing = false; 
-        _mouthOpen = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isTalking = false;
+          _isBlushing = false; 
+          _mouthOpen = false;
+        });
+      }
       _talkingMouthTimer?.cancel();
       _log.info('Audio animation stopped.');
     }
@@ -262,10 +354,35 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     _audioPlayer.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed || 
           state.processingState == ProcessingState.idle) {
-        _stopAnimation();
-        if (_isSessionActive) {
-            _resetSessionTimer();
-             _resumeSessionListening();
+        
+        // Audio physically finished. Now start the cooldown.
+        if (_isAudioPlaying) {
+            _log.info("Audio playback completed. Starting 2s cooldown.");
+            if (mounted) {
+              setState(() {
+                _isAudioPlaying = false;
+                _postPlaybackCooldown = true;
+                _isTalking = false; // Stop animation
+                _mouthOpen = false;
+              });
+            }
+            
+            // Wait for echo to die down
+            Timer(const Duration(milliseconds: 2000), () async {
+               _log.info("Cooldown expired. Listening resumed.");
+               if (mounted) {
+                 setState(() => _postPlaybackCooldown = false);
+               }
+               
+               // Handle pending call AFTER cooldown to ensure clean break
+               if (_pendingCall) {
+                   _log.info("Cooldown done. Executing pending call.");
+                   _pendingCall = false;
+                   await _initiateCall();
+               } else if (_isSessionActive) {
+                   _resumeSessionListening(); 
+               }
+            });
         }
       }
     });
@@ -273,18 +390,27 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
   
   void _resumeSessionListening() async {
       if (!_isSessionActive) return;
-      _log.info("Resuming session listening after bot speech...");
+      
+      _log.info("Resuming session listening... Waiting for echo decay.");
+      
+      // Wait for room echo to die down
+      await Future.delayed(const Duration(milliseconds: 2000));
       
       try {
-        _voiceProcessor?.removeFrameListener(_voiceProcessorFrameListener);
-        _voiceProcessor?.removeFrameListener(_vadOnlyFrameListener);
-        
-        // Restart VP for VAD only
-        _voiceProcessor?.addFrameListener(_vadOnlyFrameListener);
-        
-        // Restart capture (it was stopped in _stopRecording)
-        await _voiceProcessor?.stop(); // Safety
+        // Start Hardware FIRST (to flush buffer)
+        await _voiceProcessor?.stop(); 
         await _voiceProcessor?.start(512, 16000);
+        
+        // Wait 1.5s to flush "pop" and stale frames
+        await Future.delayed(const Duration(milliseconds: 1500));
+        
+        // ATTACH LISTENER
+        if (!_isListenerAttached && _isSessionActive) {
+            _voiceProcessor?.removeFrameListener(_onAudioFrame); 
+            _voiceProcessor?.addFrameListener(_onAudioFrame);
+            _isListenerAttached = true;
+            _log.info("Listener attached. Ready for user input.");
+        }
         
       } catch (e) {
           _log.severe("Error resuming session listening: $e");
@@ -293,7 +419,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
 
   void _startBlinking() {
     _blinkTimer = Timer.periodic(const Duration(seconds: 4), (_) async {
-      setState(() => _eyesClosed = true);
+      if (mounted) setState(() => _eyesClosed = true);
       await Future.delayed(const Duration(milliseconds: 200));
       if (mounted) setState(() => _eyesClosed = false);
     });
@@ -312,6 +438,7 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
 
   void _startRecording() async {
     _audioBuffer.clear();
+    // Do NOT reset pendingCall here; it comes from stream logic
     
     _audioStreamController = StreamController<List<int>>();
     
@@ -319,33 +446,55 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       _log.info("Starting gRPC speech stream...");
       
       final buddyId = FirebaseService.currentUserModel.id;
-      final caregiverId = FirebaseService.caregiverId ?? 'unknown_caregiver';
+      final caregiverId = FirebaseService.caregiverId;
+
+      if (caregiverId == null || caregiverId == 'unknown_caregiver') {
+        _log.warning("Abort recording: Caregiver ID is unknown.");
+        await _audioStreamController?.close();
+        if (mounted) {
+          setState(() {
+            _isRecording = false;
+            _isProcessingGrpc = false;
+          });
+        }
+        return;
+      }
       
+      final activeReminders = ReminderService.instance.getActiveRemindersText();
+
       final responseStream = _grpcClient.processSpeechStream(
         _audioStreamController!.stream, 
         16000,
         caregiverId,
-        buddyId
+        buddyId,
+        activeReminders
       );
       
       _grpcStreamSubscription = responseStream.listen(
         (response) {
-          _log.info("Received stream response: Transcribed: ${response.transcribedText}, LLM: ${response.llmResponse}");
+          _log.info("Received stream response: Transcribed: ${response.transcribedText}, LLM: ${response.llmResponse}, TriggerCall: ${response.triggerCall}");
           
           if (response.triggerCall) {
-             _log.info("Trigger call detected! Initiating call to caregiver...");
-             _initiateCall();
-             _endSession(); 
+             _log.info("Trigger call detected!");
+             _pendingCall = true;
+             _endSession(restartWakeWord: false); 
           }
           
           if (response.audioData.isNotEmpty) {
              _playAudioResponse(response.audioData);
+          } else if (_pendingCall) {
+             // If no audio but call triggered, execute immediately (via listener logic simulation or direct call)
+             // We can simulate playback finish to trigger the flow
+             _log.info("No audio with trigger call, initiating call immediately.");
+             _initiateCall();
+             _pendingCall = false;
           }
         },
         onError: (e) {
           _log.severe('gRPC stream error: $e');
-          setState(() => _isBlushing = false);
+          if (mounted) setState(() => _isBlushing = false);
           if (_isSessionActive) _resumeSessionListening();
+          _pendingCall = false; 
         },
         onDone: () {
           _log.info('gRPC stream closed by server.');
@@ -356,19 +505,38 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
        return;
     }
 
-    _voiceProcessor?.addFrameListener(_voiceProcessorFrameListener);
-    // VP is already running from session start.
-    
-    setState(() {
-      _isRecording = true;
-      _isProcessingGrpc = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isRecording = true;
+        _isProcessingGrpc = true;
+      });
+    }
     _log.info("Recording started...");
 
     _vadSilenceTimer = Timer(_vadSilenceTimeout, _stopRecording);
   }
 
   Future<void> _initiateCall() async {
+    _log.info(">>> _initiateCall STARTED <<<");
+    
+    // STRICT CLEANUP
+    _sessionExpiryTimer?.cancel();
+    _vadSilenceTimer?.cancel();
+    _voiceProcessor?.removeFrameListener(_onAudioFrame);
+    await _voiceProcessor?.stop();
+    await _cobraVADService.stop();
+    await _wakeWordService.stop();
+    
+    if (mounted) {
+      setState(() {
+        _isListening = false;
+        _isSessionActive = false;
+        _isRecording = false;
+      });
+    }
+    
+    _startCallStatusPolling();
+
     String? caregiverId = FirebaseService.caregiverId;
 
     if (caregiverId == null) {
@@ -383,55 +551,52 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     }
 
     if (caregiverId == null) {
-      _log.warning("Cannot initiate call: Caregiver ID not found.");
+      _log.severe("Cannot initiate call: Caregiver ID not found after reload.");
+      _restartServices();
       return;
     }
 
     String caregiverName = FirebaseService.caregiverName ?? 'Caregiver';
     _log.info("Sending call invitation to caregiver: $caregiverId ($caregiverName)");
     
-    await ZegoUIKitPrebuiltCallInvitationService().send(
-      invitees: [
-        ZegoCallUser(
-          caregiverId,
-          caregiverName, 
-        ),
-      ],
-      isVideoCall: false, 
-    );
+    try {
+      await ZegoUIKitPrebuiltCallInvitationService().send(
+        invitees: [
+          ZegoCallUser(
+            caregiverId,
+            caregiverName, 
+          ),
+        ],
+        isVideoCall: false, 
+      );
+      _log.info("Zego call invitation sent successfully.");
+    } catch (e) {
+      _log.severe("Error sending Zego invitation: $e");
+      _restartServices();
+    }
   }
 
   void _stopRecording() async {
     if (!_isRecording) return;
     _interactionStartTime = DateTime.now();
+    _lastRecordingEndTime = DateTime.now(); 
     _log.info("Silence timeout, stopping recording.");
 
     _vadSilenceTimer?.cancel();
     
-    // Stop VP during playback to prevent echo
     await _voiceProcessor?.stop();
-    _voiceProcessor?.removeFrameListener(_voiceProcessorFrameListener);
 
     if (_audioStreamController != null && !_audioStreamController!.isClosed) {
       await _audioStreamController!.close();
       _log.info("Audio stream closed.");
     }
 
-    setState(() {
-      _isRecording = false;
-      _isVoiceDetected = false;
-      _isBlushing = true; 
-    });
-  }
-
-  void _voiceProcessorFrameListener(List<int> frame) {
-    if (_isRecording) {
-      _cobraVADService.process(frame);
-      if (_audioStreamController != null && !_audioStreamController!.isClosed) {
-         final pcm16 = Int16List.fromList(frame);
-         final bytes = pcm16.buffer.asUint8List();
-         _audioStreamController!.add(bytes);
-      }
+    if (mounted) {
+      setState(() {
+        _isRecording = false;
+        _isVoiceDetected = false;
+        _isBlushing = true; 
+      });
     }
   }
 
@@ -439,6 +604,13 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     _log.info('Preparing to play ${pcmBytes.length} bytes of PCM audio.');
     
     _sessionExpiryTimer?.cancel();
+    
+    if (_isListenerAttached) {
+        _voiceProcessor?.removeFrameListener(_onAudioFrame);
+        _isListenerAttached = false;
+    }
+    
+    await _voiceProcessor?.stop();
     
     try {
       const sampleRate = 24000;
@@ -448,28 +620,36 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       final header = _generateWavHeader(pcmBytes.length, numChannels, sampleRate, bitsPerSample);
       final wavBytes = header + pcmBytes;
 
-      _stopAnimation();
-
       await _audioPlayer.setAudioSource(BytesAudioSource(wavBytes));
-      _audioPlayer.play();
       
-      if (_interactionStartTime != null) {
-        final latency = DateTime.now().difference(_interactionStartTime!);
-        _log.info('LATENCY (End of speech -> Start of playback): ${(latency.inMilliseconds / 1000).toStringAsFixed(2)} seconds');
+      // Set flags BEFORE playing
+      if (mounted) {
+        setState(() {
+          _isAudioPlaying = true;
+          _isTalking = true;
+          _postPlaybackCooldown = false;
+        });
       }
-
-      setState(() => _isTalking = true);
-
+      
+      _talkingMouthTimer?.cancel();
       _talkingMouthTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
-        if (mounted) {
+        if (mounted && _isTalking) {
           setState(() => _mouthOpen = !_mouthOpen);
         }
       });
+
+      await _audioPlayer.play();
+      // We rely on the listener to handle the end.
+
     } catch (e) {
       _log.severe('Error playing audio response: $e');
-      _stopAnimation();
-      if (_isSessionActive) _resumeSessionListening();
-    }
+      if (mounted) {
+          setState(() {
+            _isAudioPlaying = false;
+            _isTalking = false;
+          });
+      }
+    } 
   }
 
   Uint8List _generateWavHeader(int dataLength, int numChannels, int sampleRate, int bitsPerSample) {
@@ -513,14 +693,16 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
     _talkingMouthTimer?.cancel();
     _vadSilenceTimer?.cancel();
     _sessionExpiryTimer?.cancel();
-    _grpcStreamSubscription?.cancel(); 
+    _grpcStreamSubscription?.cancel();
+    _roomStateNotifier?.removeListener(_onZegoRoomStateChanged);
+    _callCheckTimer?.cancel();
+    _postPlaybackMuteTimer?.cancel();
     _grpcClient.shutdown();
     _audioRecorder.dispose();
     _audioPlayer.dispose();
     _wakeWordService.dispose();
     _cobraVADService.dispose();
-    _voiceProcessor?.removeFrameListener(_voiceProcessorFrameListener);
-    _voiceProcessor?.removeFrameListener(_vadOnlyFrameListener);
+    _voiceProcessor?.removeFrameListener(_onAudioFrame);
     _voiceProcessor?.stop();
     _log.info('ChatBotFace disposed, clients and players shut down.');
     super.dispose();
@@ -592,7 +774,6 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
       height: size.height,
       child: Stack(
         children: [
-          // Face background
           Container(
             width: double.infinity,
             height: double.infinity,
@@ -601,7 +782,6 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
               shape: BoxShape.rectangle,
             ),
           ),
-          // Eyes
           Positioned(
             top: size.height * 0.22,
             left: size.width * 0.25 - 15,
@@ -612,7 +792,6 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
             right: size.width * 0.25 - 15,
             child: _buildEye(_eyesClosed),
           ),
-          // Cheeks
           Positioned(
             top: size.height * 0.32,
             left: size.width * 0.12,
@@ -623,25 +802,19 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
             right: size.width * 0.12,
             child: _buildCheek(),
           ),
-          // Mouth
           Positioned(
             top: size.height * 0.60,
             left: (size.width / 2) - 45,
             child: _buildMouth(),
           ),
-          // gRPC Response Display and Loading Indicator
           Positioned(
             top: size.height * 0.45,
             left: 0,
             right: 0,
             child: Column(
-              children: [
-                // CircularProgressIndicator removed
-                // _responseMessage text removed
-              ],
+              children: [],
             ),
           ),
-          // Microphone button
           Positioned(
             bottom: 12,
             left: 12,
@@ -665,7 +838,6 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
               ],
             ),
           ),
-          // Video call button (top-right)
           Positioned(
             top: 8,
             right: 8,
@@ -673,10 +845,18 @@ class _ChatBotFaceState extends State<ChatBotFace> with TickerProviderStateMixin
               tooltip: 'Start call',
               iconSize: 28,
               icon: const Icon(Icons.video_call, color: Colors.black),
-              onPressed: () {
-                Navigator.of(context).push(
+              onPressed: () async {
+                _voiceProcessor?.removeFrameListener(_onAudioFrame);
+                await _voiceProcessor?.stop();
+                await _wakeWordService.stop();
+
+                await Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const JoinScreen()),
                 );
+                
+                if (mounted && !_isListening && !_isSessionActive) {
+                   _restartServices();
+                }
               },
             ),
           ),

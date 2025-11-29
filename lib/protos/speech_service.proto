@@ -10,7 +10,8 @@ message AudioRequest {
   bytes audio_data = 1;
   int32 sample_rate = 2;
   string uid = 3;
-  string buddy_id = 4;  
+  string buddy_id = 4;
+  string active_reminders_text = 5;
 }
 
 message AudioResponse {

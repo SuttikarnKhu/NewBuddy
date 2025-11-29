@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:zego_uikit_prebuilt_call/zego_uikit_prebuilt_call.dart';
 import '../widgets/chatbot_face.dart';
+import '../services/reminder_service.dart';
 import '../services/firebase_service.dart';
 import 'id_input_screen.dart';
 
@@ -13,6 +14,24 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  
+  @override
+  void initState() {
+    super.initState();
+    _initReminders();
+  }
+
+  Future<void> _initReminders() async {
+    await ReminderService.instance.init();
+    ReminderService.instance.startListening();
+  }
+
+  @override
+  void dispose() {
+    ReminderService.instance.stopListening();
+    super.dispose();
+  }
+
   Future<void> _signOut() async {
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(

@@ -10,7 +10,6 @@
 // ignore_for_file: deprecated_member_use_from_same_package, library_prefixes
 // ignore_for_file: non_constant_identifier_names
 
-import 'dart:async' as $async;
 import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
@@ -23,12 +22,15 @@ class AudioRequest extends $pb.GeneratedMessage {
     $core.int? sampleRate,
     $core.String? uid,
     $core.String? buddyId,
+    $core.String? activeRemindersText,
   }) {
     final result = create();
     if (audioData != null) result.audioData = audioData;
     if (sampleRate != null) result.sampleRate = sampleRate;
     if (uid != null) result.uid = uid;
     if (buddyId != null) result.buddyId = buddyId;
+    if (activeRemindersText != null)
+      result.activeRemindersText = activeRemindersText;
     return result;
   }
 
@@ -50,6 +52,7 @@ class AudioRequest extends $pb.GeneratedMessage {
     ..aI(2, _omitFieldNames ? '' : 'sampleRate')
     ..aOS(3, _omitFieldNames ? '' : 'uid')
     ..aOS(4, _omitFieldNames ? '' : 'buddyId')
+    ..aOS(5, _omitFieldNames ? '' : 'activeRemindersText')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -106,6 +109,15 @@ class AudioRequest extends $pb.GeneratedMessage {
   $core.bool hasBuddyId() => $_has(3);
   @$pb.TagNumber(4)
   void clearBuddyId() => $_clearField(4);
+
+  @$pb.TagNumber(5)
+  $core.String get activeRemindersText => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set activeRemindersText($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasActiveRemindersText() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearActiveRemindersText() => $_clearField(5);
 }
 
 class AudioResponse extends $pb.GeneratedMessage {
@@ -197,17 +209,6 @@ class AudioResponse extends $pb.GeneratedMessage {
   $core.bool hasTriggerCall() => $_has(3);
   @$pb.TagNumber(4)
   void clearTriggerCall() => $_clearField(4);
-}
-
-class SpeechServiceApi {
-  final $pb.RpcClient _client;
-
-  SpeechServiceApi(this._client);
-
-  $async.Future<AudioResponse> processSpeech(
-          $pb.ClientContext? ctx, AudioRequest request) =>
-      _client.invoke<AudioResponse>(
-          ctx, 'SpeechService', 'ProcessSpeech', request, AudioResponse());
 }
 
 const $core.bool _omitFieldNames =
